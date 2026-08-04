@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Financie</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root { --bg:#0f1420; --card:#1a2233; --text:#e8ecf4; --muted:#8b96ab; --accent:#4f8cff;
+          --green:#3ecf8e; --red:#ff6b6b; --border:#2a3450; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:16px; padding:14px 24px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  header h1 { font-size:20px; margin:0 16px 0 0; }
+  nav button { background:none; border:none; color:var(--muted); font-size:15px; padding:8px 14px; cursor:pointer; border-radius:8px; }
+  nav button.active { color:var(--text); background:var(--card); }
+  .hright { margin-left:auto; display:flex; align-items:center; gap:12px; }
+  #gemmaStatus { font-size:13px; color:var(--muted); }
+  main { padding:24px; max-width:1100px; margin:0 auto; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:24px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px; }
+  .card .label { color:var(--muted); font-size:13px; margin-bottom:6px; }
+  .card .value { font-size:26px; font-weight:600; }
+  .green { color:var(--green); } .red { color:var(--red); }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:800px){ .row { grid-template-columns:1fr; } }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:500; }
+  td.num { text-align:right; white-space:nowrap; }
+  td.nowrap, th.nowrap { white-space:nowrap; }
+  /* pevné šírky stĺpcov v Transakciách, aby layout neskákal podľa obsahu */
+  #txTable { table-layout:fixed; }
+  #txTable col.c-date { width:104px; } #txTable col.c-acct { width:132px; }
+  #txTable col.c-cparty { width:22%; } #txTable col.c-cat { width:170px; }
+  #txTable col.c-amt { width:110px; }  #txTable col.c-del { width:44px; }
+  #txTable td { overflow:hidden; text-overflow:ellipsis; }
+  #txTable select { width:100%; }
+  select, input, button.btn { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:14px; }
+  button.btn { cursor:pointer; } button.btn.primary { background:var(--accent); border-color:var(--accent); }
+  .toolbar { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+  .bar { background:var(--bg); border-radius:6px; height:8px; overflow:hidden; }
+  .bar > div { height:100%; background:var(--green); }
+  .bar > div.over { background:var(--red); }
+  .hidden { display:none; }
+  h2 { font-size:17px; margin:0 0 12px; }
+  .msg { padding:10px 14px; border-radius:8px; background:var(--card); border:1px solid var(--border); margin-bottom:14px; }
+  .hint { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>💶 <span data-i18n="app_title">Financie</span></h1>
+  <nav>
+    <button data-tab="prehlad" class="active" data-i18n="nav_overview"></button>
+    <button data-tab="transakcie" data-i18n="nav_transactions"></button>
+    <button data-tab="rozpocet" data-i18n="nav_budget"></button>
+    <button data-tab="majetok" data-i18n="nav_assets"></button>
+    <button data-tab="import" data-i18n="nav_import"></button>
+  </nav>
+  <div class="hright">
+    <span id="gemmaStatus"></span>
+    <select id="langSel">
+      <option value="sk">SK</option><option value="de">DE</option><option value="en">EN</option>
+    </select>
+  </div>
+</header>
+<main>
+
+<section id="tab-prehlad">
+  <div class="toolbar">
+    <select id="ovPreset">
+      <option value="this_month" data-i18n="p_this_month"></option>
+      <option value="last_month" data-i18n="p_last_month"></option>
+      <option value="this_year" data-i18n="p_this_year"></option>
+      <option value="last_year" data-i18n="p_last_year"></option>
+      <option value="all" data-i18n="p_all"></option>
+      <option value="custom" data-i18n="p_custom"></option>
+    </select>
+    <button class="btn" onclick="shiftPeriod(-1)">◀</button>
+    <input type="date" id="ovFrom"> – <input type="date" id="ovTo">
+    <button class="btn" onclick="shiftPeriod(1)">▶</button>
+  </div>
+  <div class="cards">
+    <div class="card"><div class="label" data-i18n="income"></div><div class="value green" id="ovIncome">–</div></div>
+    <div class="card"><div class="label" data-i18n="expenses"></div><div class="value red" id="ovExpense">–</div></div>
+    <div class="card"><div class="label" data-i18n="month_balance"></div><div class="value" id="ovNet">–</div></div>
+    <div class="card"><div class="label" data-i18n="net_worth"></div><div class="value" id="ovNW">–</div></div>
+  </div>
+  <div class="row">
+    <div class="card"><h2 data-i18n="expenses_by_cat"></h2><canvas id="catChart"></canvas></div>
+    <div class="card"><h2 data-i18n="monthly_trend"></h2><canvas id="monthChart"></canvas></div>
+  </div>
+</section>
+
+<section id="tab-transakcie" class="hidden">
+  <div class="toolbar">
+    <input type="month" id="txMonth">
+    <select id="txAccount"></select>
+    <input type="search" id="txSearch" data-i18n-ph="search_ph">
+    <label><input type="checkbox" id="txUncat"> <span data-i18n="only_uncat"></span></label>
+    <button class="btn" onclick="recat()">🤖 <span data-i18n="recat_btn"></span></button>
+    <span id="recatMsg" class="hint"></span>
+  </div>
+  <div class="card"><table id="txTable">
+    <colgroup>
+      <col class="c-date"><col class="c-acct"><col><col class="c-cparty">
+      <col class="c-cat"><col class="c-amt"><col class="c-del">
+    </colgroup>
+    <thead><tr><th data-i18n="col_date"></th><th data-i18n="col_account"></th><th data-i18n="col_desc"></th><th data-i18n="col_cparty"></th><th data-i18n="col_cat"></th><th class="num" data-i18n="col_amount"></th><th></th></tr></thead>
+    <tbody></tbody></table></div>
+</section>
+
+<section id="tab-rozpocet" class="hidden">
+  <div class="toolbar"><input type="month" id="buMonth"><span class="hint" data-i18n="budget_hint"></span></div>
+  <div class="toolbar">
+    <input id="newCatName" data-i18n-ph="new_cat_ph">
+    <select id="newCatKind"><option value="expense" data-i18n="kind_expense"></option><option value="income" data-i18n="kind_income"></option></select>
+    <button class="btn" onclick="addCat()" data-i18n="add_cat_btn"></button>
+  </div>
+  <div class="card"><table id="buTable">
+    <thead><tr><th data-i18n="col_cat"></th><th class="num" data-i18n="col_limit"></th><th class="num" data-i18n="col_spent"></th><th style="width:30%" data-i18n="col_progress"></th><th></th></tr></thead>
+    <tbody></tbody></table></div>
+</section>
+
+<section id="tab-majetok" class="hidden">
+  <div class="cards">
+    <div class="card"><div class="label" data-i18n="accounts_total"></div><div class="value" id="nwAccounts">–</div></div>
+    <div class="card"><div class="label" data-i18n="assets_liabilities"></div><div class="value" id="nwAssets">–</div></div>
+    <div class="card"><div class="label" data-i18n="net_worth"></div><div class="value" id="nwTotal">–</div></div>
+  </div>
+  <div class="row">
+    <div class="card">
+      <h2 data-i18n="assets_liabilities"></h2>
+      <table id="assetTable"><thead><tr><th data-i18n="col_name"></th><th data-i18n="col_type"></th><th class="num" data-i18n="col_value"></th><th></th></tr></thead><tbody></tbody></table>
+      <div class="toolbar" style="margin-top:12px">
+        <input id="newAssetName" data-i18n-ph="asset_name_ph">
+        <select id="newAssetType">
+          <option value="nehnutelnost" data-i18n="at_nehnutelnost"></option><option value="etf">ETF</option>
+          <option value="akcie" data-i18n="at_akcie"></option><option value="krypto" data-i18n="at_krypto"></option>
+          <option value="dochodok" data-i18n="at_dochodok"></option><option value="zavazok" data-i18n="at_zavazok"></option>
+          <option value="ine" data-i18n="at_ine"></option>
+        </select>
+        <button class="btn primary" onclick="addAsset()" data-i18n="add_btn"></button>
+      </div>
+      <div class="toolbar">
+        <select id="valAsset"></select>
+        <input type="date" id="valDate">
+        <input type="number" step="0.01" id="valValue" data-i18n-ph="value_ph">
+        <button class="btn" onclick="addValue()" data-i18n="save_valuation"></button>
+      </div>
+    </div>
+    <div class="card"><h2 data-i18n="asset_trend"></h2><canvas id="nwChart"></canvas></div>
+  </div>
+</section>
+
+<section id="tab-import" class="hidden">
+  <div class="msg" data-i18n-html="import_info"></div>
+  <div class="card">
+    <div class="toolbar">
+      <select id="impAccount"></select>
+      <input type="file" id="impFile" accept=".csv,.xlsx,.xls,.pdf,.png,.jpg,.jpeg">
+      <button class="btn primary" onclick="doImport()" data-i18n="import_btn"></button>
+    </div>
+    <div id="impResult" class="hint"></div>
+    <div class="toolbar" style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
+      <input id="newAccName" data-i18n-ph="acc_name_ph">
+      <select id="newAccType">
+        <option value="bezny" data-i18n="acct_bezny"></option>
+        <option value="sporiaci" data-i18n="acct_sporiaci"></option>
+        <option value="kreditka" data-i18n="acct_kreditka"></option>
+        <option value="hotovost" data-i18n="acct_hotovost"></option>
+        <option value="investicny" data-i18n="acct_investicny"></option>
+        <option value="ine" data-i18n="acct_ine"></option>
+      </select>
+      <button class="btn" onclick="addAccount()" data-i18n="add_acc_btn"></button>
+      <span class="hint" data-i18n="acc_hint"></span>
+    </div>
+    <table id="accTable" style="margin-top:8px">
+      <thead><tr><th data-i18n="col_name"></th><th data-i18n="col_type"></th><th class="num" data-i18n="col_balance"></th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+</main>
+<script>
+const I18N = {
+sk: {
+  app_title:'Financie', nav_overview:'Prehľad', nav_transactions:'Transakcie', nav_budget:'Rozpočet',
+  nav_assets:'Majetok', nav_import:'Import',
+  income:'Príjmy', expenses:'Výdavky', month_balance:'Bilancia mesiaca', net_worth:'Čisté imanie',
+  expenses_by_cat:'Výdavky podľa kategórií', monthly_trend:'Vývoj po mesiacoch',
+  p_this_month:'Tento mesiac', p_last_month:'Minulý mesiac', p_this_year:'Tento rok',
+  p_last_year:'Minulý rok', p_all:'Všetko', p_custom:'Vlastné obdobie',
+  search_ph:'Hľadať…', only_uncat:'len nezaradené', recat_btn:'Dokategorizovať',
+  recat_working:'Gemma pracuje… (max 200 naraz, priebeh v termináli)',
+  recat_done:(n,r)=>`Zaradených ${n}, zostáva nezaradených ${r}.`,
+  col_date:'Dátum', col_account:'Účet', all_accounts:'Všetky účty', col_desc:'Popis', col_cparty:'Protistrana', col_cat:'Kategória', col_amount:'Suma',
+  col_limit:'Limit €', col_spent:'Minuté', col_progress:'Plnenie', col_name:'Názov', col_type:'Typ', col_value:'Hodnota',
+  budget_hint:'Limit uložíš klávesom Enter. Platí pre každý mesiac.',
+  new_cat_ph:'Nová kategória…', kind_expense:'výdavok', kind_income:'príjem', add_cat_btn:'Pridať kategóriu',
+  del_cat_confirm:n=>`Vymazať kategóriu „${n}"? Transakcie ostanú, ale budú nezaradené.`,
+  accounts_total:'Účty spolu', assets_liabilities:'Aktíva a záväzky', asset_trend:'Vývoj hodnoty aktív',
+  asset_name_ph:'Názov (napr. Byt, ETF, Hypotéka)', value_ph:'Hodnota € (záväzok záporne)',
+  add_btn:'Pridať', save_valuation:'Uložiť ocenenie',
+  del_asset_confirm:'Vymazať aktívum aj s históriou ocenení?', del_tx_confirm:'Vymazať transakciu?',
+  at_nehnutelnost:'Nehnuteľnosť', at_akcie:'Akcie', at_krypto:'Krypto', at_dochodok:'Dôchodkové sporenie',
+  at_zavazok:'Záväzok (úver)', at_ine:'Iné',
+  import_info:'Podporované: <b>CSV, XLSX</b> (spracujem priamo), <b>PDF, PNG/JPG</b> (spracuje lokálna Gemma — musí bežať Ollama).<br>Duplicitné transakcie sa pri opakovanom importe automaticky preskočia.<br><b>Dôležité:</b> pre každú kreditku si vytvor samostatný účet a jej výpisy importuj naň. Mesačné vyrovnanie karty označ kategóriou „Prevod medzi účtami" — nepočíta sa do výdavkov.',
+  acc_name_ph:'Nový účet (napr. Visa kreditka)…', add_acc_btn:'Pridať účet',
+  acc_hint:'Účet vyberáš pri importe — súbor sám nehovorí, odkiaľ je.',
+  acct_bezny:'bežný', acct_sporiaci:'sporiaci', acct_kreditka:'kreditná karta',
+  acct_hotovost:'hotovosť', acct_investicny:'investičný', acct_ine:'iný',
+  col_balance:'Zostatok', del_acc_confirm:n=>`Vymazať účet „${n}"?`,
+  err_account_not_empty:'Účet má transakcie, nedá sa vymazať. Počet',
+  import_btn:'Importovať', choose_file:'Vyber súbor.',
+  importing:'Spracúvam… (PDF/obrázky cez Gemmu môžu trvať aj minúty)',
+  import_done:r=>`Hotovo: ${r.inserted} nových, ${r.skipped_duplicates} duplicít preskočených, ${r.auto_categorized} zaradených podľa naučených. ${r.uncategorized} nezaradených — zaradíš ich tlačidlom „Dokategorizovať" v Transakciách.`,
+  error:'Chyba', gemma_ready:m=>`● Gemma pripravená (${m})`, gemma_off:'○ Ollama nebeží',
+  err_ollama_missing:'Ollama nebeží — spusti ju, alebo importuj CSV/XLSX.',
+  err_parse_failed:'Súbor sa nepodarilo spracovať', err_no_transactions:'V súbore sa nenašli žiadne transakcie.',
+  err_empty_name:'Názov nesmie byť prázdny.', err_duplicate_category:'Kategória s týmto názvom už existuje.',
+},
+de: {
+  app_title:'Finanzen', nav_overview:'Übersicht', nav_transactions:'Umsätze', nav_budget:'Budget',
+  nav_assets:'Vermögen', nav_import:'Import',
+  income:'Einnahmen', expenses:'Ausgaben', month_balance:'Monatsbilanz', net_worth:'Nettovermögen',
+  expenses_by_cat:'Ausgaben nach Kategorien', monthly_trend:'Monatsverlauf',
+  p_this_month:'Dieser Monat', p_last_month:'Letzter Monat', p_this_year:'Dieses Jahr',
+  p_last_year:'Letztes Jahr', p_all:'Alles', p_custom:'Eigener Zeitraum',
+  search_ph:'Suchen…', only_uncat:'nur ohne Kategorie', recat_btn:'Nachkategorisieren',
+  recat_working:'Gemma arbeitet… (max. 200 auf einmal, Fortschritt im Terminal)',
+  recat_done:(n,r)=>`${n} zugeordnet, ${r} verbleiben ohne Kategorie.`,
+  col_date:'Datum', col_account:'Konto', all_accounts:'Alle Konten', col_desc:'Verwendungszweck', col_cparty:'Beteiligter', col_cat:'Kategorie', col_amount:'Betrag',
+  col_limit:'Limit €', col_spent:'Ausgegeben', col_progress:'Auslastung', col_name:'Name', col_type:'Typ', col_value:'Wert',
+  budget_hint:'Limit mit Enter speichern. Gilt für jeden Monat.',
+  new_cat_ph:'Neue Kategorie…', kind_expense:'Ausgabe', kind_income:'Einnahme', add_cat_btn:'Kategorie hinzufügen',
+  del_cat_confirm:n=>`Kategorie „${n}" löschen? Die Umsätze bleiben erhalten, aber ohne Kategorie.`,
+  accounts_total:'Konten gesamt', assets_liabilities:'Vermögen und Verbindlichkeiten', asset_trend:'Wertentwicklung',
+  asset_name_ph:'Name (z. B. Wohnung, ETF, Hypothek)', value_ph:'Wert € (Verbindlichkeit negativ)',
+  add_btn:'Hinzufügen', save_valuation:'Bewertung speichern',
+  del_asset_confirm:'Vermögenswert samt Bewertungshistorie löschen?', del_tx_confirm:'Umsatz löschen?',
+  at_nehnutelnost:'Immobilie', at_akcie:'Aktien', at_krypto:'Krypto', at_dochodok:'Altersvorsorge',
+  at_zavazok:'Verbindlichkeit (Kredit)', at_ine:'Sonstiges',
+  import_info:'Unterstützt: <b>CSV, XLSX</b> (direkte Verarbeitung), <b>PDF, PNG/JPG</b> (lokale Gemma — Ollama muss laufen).<br>Doppelte Umsätze werden beim erneuten Import automatisch übersprungen.<br><b>Wichtig:</b> Lege für jede Kreditkarte ein eigenes Konto an und importiere ihre Auszüge dorthin. Den monatlichen Kartenausgleich mit der Kategorie „Prevod medzi účtami" (Umbuchung) markieren — er zählt nicht als Ausgabe.',
+  acc_name_ph:'Neues Konto (z. B. Visa Kreditkarte)…', add_acc_btn:'Konto hinzufügen',
+  acc_hint:'Das Konto wählst du beim Import — die Datei selbst sagt nicht, woher sie stammt.',
+  acct_bezny:'Girokonto', acct_sporiaci:'Sparkonto', acct_kreditka:'Kreditkarte',
+  acct_hotovost:'Bargeld', acct_investicny:'Depot', acct_ine:'Sonstiges',
+  col_balance:'Saldo', del_acc_confirm:n=>`Konto „${n}" löschen?`,
+  err_account_not_empty:'Konto hat Umsätze und kann nicht gelöscht werden. Anzahl',
+  import_btn:'Importieren', choose_file:'Bitte Datei auswählen.',
+  importing:'Verarbeitung läuft… (PDF/Bilder über Gemma können Minuten dauern)',
+  import_done:r=>`Fertig: ${r.inserted} neu, ${r.skipped_duplicates} Duplikate übersprungen, ${r.auto_categorized} nach gelernten Regeln zugeordnet. ${r.uncategorized} ohne Kategorie — über „Nachkategorisieren" in Umsätze zuordnen.`,
+  error:'Fehler', gemma_ready:m=>`● Gemma bereit (${m})`, gemma_off:'○ Ollama läuft nicht',
+  err_ollama_missing:'Ollama läuft nicht — starte sie oder importiere CSV/XLSX.',
+  err_parse_failed:'Datei konnte nicht verarbeitet werden', err_no_transactions:'Keine Umsätze in der Datei gefunden.',
+  err_empty_name:'Name darf nicht leer sein.', err_duplicate_category:'Kategorie mit diesem Namen existiert bereits.',
+},
+en: {
+  app_title:'Finances', nav_overview:'Overview', nav_transactions:'Transactions', nav_budget:'Budget',
+  nav_assets:'Assets', nav_import:'Import',
+  income:'Income', expenses:'Expenses', month_balance:'Month balance', net_worth:'Net worth',
+  expenses_by_cat:'Expenses by category', monthly_trend:'Monthly trend',
+  p_this_month:'This month', p_last_month:'Last month', p_this_year:'This year',
+  p_last_year:'Last year', p_all:'All time', p_custom:'Custom range',
+  search_ph:'Search…', only_uncat:'uncategorized only', recat_btn:'Recategorize',
+  recat_working:'Gemma is working… (max 200 at once, progress in terminal)',
+  recat_done:(n,r)=>`${n} categorized, ${r} remaining uncategorized.`,
+  col_date:'Date', col_account:'Account', all_accounts:'All accounts', col_desc:'Description', col_cparty:'Counterparty', col_cat:'Category', col_amount:'Amount',
+  col_limit:'Limit €', col_spent:'Spent', col_progress:'Progress', col_name:'Name', col_type:'Type', col_value:'Value',
+  budget_hint:'Press Enter to save a limit. Applies to every month.',
+  new_cat_ph:'New category…', kind_expense:'expense', kind_income:'income', add_cat_btn:'Add category',
+  del_cat_confirm:n=>`Delete category "${n}"? Its transactions remain but become uncategorized.`,
+  accounts_total:'Accounts total', assets_liabilities:'Assets & liabilities', asset_trend:'Asset value trend',
+  asset_name_ph:'Name (e.g. Flat, ETF, Mortgage)', value_ph:'Value € (liability negative)',
+  add_btn:'Add', save_valuation:'Save valuation',
+  del_asset_confirm:'Delete asset including valuation history?', del_tx_confirm:'Delete transaction?',
+  at_nehnutelnost:'Real estate', at_akcie:'Stocks', at_krypto:'Crypto', at_dochodok:'Pension savings',
+  at_zavazok:'Liability (loan)', at_ine:'Other',
+  import_info:'Supported: <b>CSV, XLSX</b> (processed directly), <b>PDF, PNG/JPG</b> (processed by local Gemma — Ollama must be running).<br>Duplicate transactions are skipped automatically on re-import.<br><b>Important:</b> create a separate account for each credit card and import its statements there. Mark the monthly card settlement with the "Prevod medzi účtami" (transfer) category — it is not counted as an expense.',
+  acc_name_ph:'New account (e.g. Visa credit card)…', add_acc_btn:'Add account',
+  acc_hint:'You choose the account at import time — the file itself does not say where it came from.',
+  acct_bezny:'checking', acct_sporiaci:'savings', acct_kreditka:'credit card',
+  acct_hotovost:'cash', acct_investicny:'investment', acct_ine:'other',
+  col_balance:'Balance', del_acc_confirm:n=>`Delete account "${n}"?`,
+  err_account_not_empty:'Account has transactions and cannot be deleted. Count',
+  import_btn:'Import', choose_file:'Choose a file.',
+  importing:'Processing… (PDF/images via Gemma can take minutes)',
+  import_done:r=>`Done: ${r.inserted} new, ${r.skipped_duplicates} duplicates skipped, ${r.auto_categorized} categorized from learned rules. ${r.uncategorized} uncategorized — use "Recategorize" in Transactions.`,
+  error:'Error', gemma_ready:m=>`● Gemma ready (${m})`, gemma_off:'○ Ollama not running',
+  err_ollama_missing:'Ollama is not running — start it, or import CSV/XLSX.',
+  err_parse_failed:'Could not process file', err_no_transactions:'No transactions found in the file.',
+  err_empty_name:'Name must not be empty.', err_duplicate_category:'A category with this name already exists.',
+}};
+
+let lang = localStorage.getItem('lang') || 'sk';
+const t = k => I18N[lang][k] ?? I18N.sk[k] ?? k;
+const LOCALE = {sk:'sk-SK', de:'de-DE', en:'en-GB'};
+
+function applyI18n() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => el.textContent = t(el.dataset.i18n));
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => el.placeholder = t(el.dataset.i18nPh));
+  document.querySelectorAll('[data-i18n-html]').forEach(el => el.innerHTML = t(el.dataset.i18nHtml));
+}
+
+const $ = s => document.querySelector(s);
+const fmt = n => (n==null?'–':n.toLocaleString(LOCALE[lang],{style:'currency',currency:'EUR'}));
+const thisMonth = new Date().toISOString().slice(0,7);
+let categories = [], charts = {};
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('main section').forEach(x=>x.classList.add('hidden'));
+  b.classList.add('active');
+  $('#tab-'+b.dataset.tab).classList.remove('hidden');
+  load(b.dataset.tab);
+});
+
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    let d; try { d = (await r.json()).detail; } catch { d = r.statusText; }
+    if (d && typeof d === 'object' && d.code)
+      throw new Error(t('err_'+d.code) + (d.info ? ': '+d.info : ''));
+    throw new Error(typeof d === 'string' ? d : r.statusText);
+  }
+  return r.json();
+}
+
+function chart(id, cfg) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart($('#'+id), cfg);
+}
+
+function presetRange(p) {
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  const iso = d => d.toISOString().slice(0,10);
+  switch (p) {
+    case 'this_month': return [iso(new Date(y, m, 1)), iso(new Date(y, m+1, 0))];
+    case 'last_month': return [iso(new Date(y, m-1, 1)), iso(new Date(y, m, 0))];
+    case 'this_year':  return [`${y}-01-01`, `${y}-12-31`];
+    case 'last_year':  return [`${y-1}-01-01`, `${y-1}-12-31`];
+    case 'all':        return ['1970-01-01', '2100-12-31'];
+    default:           return [$('#ovFrom').value, $('#ovTo').value];
+  }
+}
+
+function shiftPeriod(dir) {
+  const from = new Date($('#ovFrom').value), to = new Date($('#ovTo').value);
+  if (isNaN(from) || isNaN(to)) return;
+  const iso = d => d.toISOString().slice(0,10);
+  const isMonthStart = from.getUTCDate() === 1;
+  const nextDay = new Date(to); nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const isMonthEnd = nextDay.getUTCDate() === 1;
+  if (isMonthStart && isMonthEnd) {
+    // celé kalendárne mesiace -> posun o rovnaký počet mesiacov
+    const months = (to.getUTCFullYear()-from.getUTCFullYear())*12
+                 + (to.getUTCMonth()-from.getUTCMonth()) + 1;
+    const nf = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + dir*months, 1));
+    const nt = new Date(Date.UTC(nf.getUTCFullYear(), nf.getUTCMonth() + months, 0));
+    $('#ovFrom').value = iso(nf); $('#ovTo').value = iso(nt);
+  } else {
+    const days = Math.round((to - from) / 86400000) + 1;
+    from.setUTCDate(from.getUTCDate() + dir*days);
+    to.setUTCDate(to.getUTCDate() + dir*days);
+    $('#ovFrom').value = iso(from); $('#ovTo').value = iso(to);
+  }
+  $('#ovPreset').value = 'custom';
+  loadPrehlad();
+}
+
+async function loadPrehlad() {
+  const p = $('#ovPreset').value;
+  const [from, to] = presetRange(p);
+  if (p !== 'custom') { $('#ovFrom').value = from; $('#ovTo').value = to; }
+  if (!from || !to) return;
+  const [ov, nw] = await Promise.all([
+    api(`/api/overview?date_from=${from}&date_to=${to}`), api('/api/networth')]);
+  $('#ovIncome').textContent = fmt(ov.income);
+  $('#ovExpense').textContent = fmt(ov.expense);
+  const net = ov.income + ov.expense;
+  $('#ovNet').textContent = fmt(net); $('#ovNet').className = 'value ' + (net>=0?'green':'red');
+  $('#ovNW').textContent = fmt(nw.net_worth);
+  chart('catChart', {type:'doughnut', data:{labels:ov.by_category.map(x=>x.category),
+    datasets:[{data:ov.by_category.map(x=>x.spent)}]},
+    options:{plugins:{legend:{position:'right',labels:{color:'#e8ecf4'}}}}});
+  chart('monthChart', {type:'bar', data:{labels:ov.monthly.map(x=>x.month),
+    datasets:[{label:t('income'),data:ov.monthly.map(x=>x.income),backgroundColor:'#3ecf8e'},
+              {label:t('expenses'),data:ov.monthly.map(x=>x.expense),backgroundColor:'#ff6b6b'}]},
+    options:{scales:{x:{ticks:{color:'#8b96ab'}},y:{ticks:{color:'#8b96ab'}}},
+             plugins:{legend:{labels:{color:'#e8ecf4'}}}}});
+}
+
+async function loadTransakcie() {
+  {
+    const accs = await api('/api/accounts');
+    const cur = $('#txAccount').value;
+    $('#txAccount').innerHTML = `<option value="">${t('all_accounts')}</option>` +
+      accs.map(a=>`<option value="${a.id}">${a.name}</option>`).join('');
+    $('#txAccount').value = cur;
+  }
+  const p = new URLSearchParams();
+  if ($('#txMonth').value) p.set('month', $('#txMonth').value);
+  if ($('#txAccount').value) p.set('account_id', $('#txAccount').value);
+  if ($('#txSearch').value) p.set('q', $('#txSearch').value);
+  if ($('#txUncat').checked) p.set('uncategorized','true');
+  const txs = await api('/api/transactions?'+p);
+  const opts = cid => '<option value="">—</option>' + categories.map(c =>
+    `<option value="${c.id}" ${c.id===cid?'selected':''}>${c.name}</option>`).join('');
+  $('#txTable tbody').innerHTML = txs.map(t2 => `<tr>
+    <td class="nowrap">${t2.date}</td><td class="hint nowrap">${t2.account}</td>
+    <td class="nowrap" title="${(t2.description||'').replace(/"/g,'&quot;')}">${t2.description||''}</td>
+    <td class="nowrap" title="${(t2.counterparty||'').replace(/"/g,'&quot;')}">${t2.counterparty||''}</td>
+    <td><select onchange="setCat(${t2.id}, this.value)">${opts(t2.category_id)}</select></td>
+    <td class="num ${t2.amount>=0?'green':'red'}">${fmt(t2.amount)}</td>
+    <td><button class="btn" onclick="delTx(${t2.id})">✕</button></td></tr>`).join('');
+}
+async function setCat(id, v) {
+  await api('/api/transactions/'+id, {method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({category_id: v?+v:null})});
+}
+async function delTx(id) {
+  if (!confirm(t('del_tx_confirm'))) return;
+  await api('/api/transactions/'+id, {method:'DELETE'}); loadTransakcie();
+}
+async function recat() {
+  $('#recatMsg').textContent = t('recat_working');
+  try {
+    const r = await api('/api/categorize', {method:'POST'});
+    $('#recatMsg').textContent = t('recat_done')(r.learned + r.categorized, r.remaining);
+    loadTransakcie();
+  } catch(e) { $('#recatMsg').textContent = t('error')+': '+e.message; }
+}
+
+async function loadRozpocet() {
+  const m = $('#buMonth').value || thisMonth;
+  const b = await api('/api/budget?month='+m);
+  $('#buTable tbody').innerHTML = b.items.map(i => {
+    const pct = i.budget ? Math.min(100, i.spent/i.budget*100) : 0;
+    return `<tr><td>${i.category}</td>
+      <td class="num"><input type="number" style="width:90px" value="${i.budget??''}"
+        onkeydown="if(event.key==='Enter')saveBudget(${i.category_id},this.value)"></td>
+      <td class="num">${fmt(i.spent)}</td>
+      <td>${i.budget?`<div class="bar"><div class="${i.spent>i.budget?'over':''}" style="width:${pct}%"></div></div>`:''}</td>
+      <td><button class="btn" onclick="delCat(${i.category_id}, '${i.category.replace(/'/g,"\\'")}')">✕</button></td></tr>`;
+  }).join('');
+}
+async function saveBudget(cid, v) {
+  await api('/api/budget', {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({category_id:cid, amount:+v||0})});
+  loadRozpocet();
+}
+async function addCat() {
+  try {
+    await api('/api/categories', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name:$('#newCatName').value, kind:$('#newCatKind').value})});
+    $('#newCatName').value='';
+    categories = await api('/api/categories');
+    loadRozpocet();
+  } catch(e) { alert(e.message); }
+}
+async function delCat(id, name) {
+  if (!confirm(t('del_cat_confirm')(name))) return;
+  await api('/api/categories/'+id, {method:'DELETE'});
+  categories = await api('/api/categories');
+  loadRozpocet();
+}
+
+async function loadMajetok() {
+  const nw = await api('/api/networth');
+  $('#nwAccounts').textContent = fmt(nw.total_accounts);
+  $('#nwAssets').textContent = fmt(nw.total_assets);
+  $('#nwTotal').textContent = fmt(nw.net_worth);
+  $('#assetTable tbody').innerHTML = nw.assets.map(a => `<tr>
+    <td>${a.name}</td><td>${t('at_'+a.type) !== 'at_'+a.type ? t('at_'+a.type) : a.type}</td>
+    <td class="num ${(a.value||0)>=0?'':'red'}">${fmt(a.value)}${a.date?` <small class="hint">(${a.date})</small>`:''}</td>
+    <td><button class="btn" onclick="delAsset(${a.id})">✕</button></td></tr>`).join('');
+  $('#valAsset').innerHTML = nw.assets.map(a=>`<option value="${a.id}">${a.name}</option>`).join('');
+  $('#valDate').value = new Date().toISOString().slice(0,10);
+  chart('nwChart', {type:'line', data:{labels:nw.history.map(x=>x.date),
+    datasets:[{label:t('assets_liabilities'), data:nw.history.map(x=>x.assets_total),
+    borderColor:'#4f8cff', tension:.2}]},
+    options:{scales:{x:{ticks:{color:'#8b96ab'}},y:{ticks:{color:'#8b96ab'}}},
+             plugins:{legend:{labels:{color:'#e8ecf4'}}}}});
+}
+async function addAsset() {
+  await api('/api/assets', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name:$('#newAssetName').value, type:$('#newAssetType').value})});
+  $('#newAssetName').value=''; loadMajetok();
+}
+async function delAsset(id) {
+  if (!confirm(t('del_asset_confirm'))) return;
+  await api('/api/assets/'+id, {method:'DELETE'}); loadMajetok();
+}
+async function addValue() {
+  await api('/api/asset_values', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({asset_id:+$('#valAsset').value, date:$('#valDate').value, value:+$('#valValue').value})});
+  $('#valValue').value=''; loadMajetok();
+}
+
+async function addAccount() {
+  try {
+    await api('/api/accounts', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name:$('#newAccName').value, type:$('#newAccType').value})});
+    $('#newAccName').value=''; loadImport();
+  } catch(e) { alert(e.message); }
+}
+async function loadImport() {
+  const accs = await api('/api/accounts');
+  $('#impAccount').innerHTML = accs.map(a=>`<option value="${a.id}">${a.name}</option>`).join('');
+  $('#accTable tbody').innerHTML = accs.map(a => `<tr>
+    <td>${a.name}</td><td class="hint">${t('acct_'+a.type) !== 'acct_'+a.type ? t('acct_'+a.type) : a.type}</td>
+    <td class="num">${fmt(a.balance)}</td>
+    <td><button class="btn" onclick="delAccount(${a.id}, '${a.name.replace(/'/g,"\\'")}')">✕</button></td></tr>`).join('');
+}
+async function delAccount(id, name) {
+  if (!confirm(t('del_acc_confirm')(name))) return;
+  try { await api('/api/accounts/'+id, {method:'DELETE'}); loadImport(); }
+  catch(e) { alert(e.message); }
+}
+async function doImport() {
+  const f = $('#impFile').files[0];
+  if (!f) { alert(t('choose_file')); return; }
+  const fd = new FormData();
+  fd.append('account_id', $('#impAccount').value);
+  fd.append('file', f);
+  $('#impResult').textContent = t('importing');
+  try {
+    const r = await api('/api/import', {method:'POST', body:fd});
+    $('#impResult').textContent = t('import_done')(r);
+  } catch(e) { $('#impResult').textContent = t('error')+': '+e.message; }
+}
+
+function load(tab) {
+  ({prehlad:loadPrehlad, transakcie:loadTransakcie, rozpocet:loadRozpocet,
+    majetok:loadMajetok, import:loadImport}[tab])();
+}
+
+async function refreshStatus() {
+  const st = await api('/api/status');
+  $('#gemmaStatus').textContent = st.gemma ? t('gemma_ready')(st.model) : t('gemma_off');
+  $('#gemmaStatus').style.color = st.gemma ? '#3ecf8e' : '#8b96ab';
+}
+
+$('#langSel').value = lang;
+$('#langSel').onchange = () => {
+  lang = $('#langSel').value;
+  localStorage.setItem('lang', lang);
+  applyI18n(); refreshStatus();
+  load(document.querySelector('nav .active').dataset.tab);
+};
+
+(async function init() {
+  applyI18n();
+  $('#txMonth').value = $('#buMonth').value = thisMonth;
+  $('#ovPreset').addEventListener('change', loadPrehlad);
+  ['#ovFrom','#ovTo'].forEach(s => $(s).addEventListener('change', () => {
+    $('#ovPreset').value = 'custom'; loadPrehlad();
+  }));
+  ['#txMonth','#txAccount','#txSearch','#txUncat','#buMonth'].forEach(s =>
+    $(s).addEventListener('change', () => load(document.querySelector('nav .active').dataset.tab)));
+  categories = await api('/api/categories');
+  refreshStatus();
+  loadPrehlad();
+})();
+</script>
+</body>
+</html>

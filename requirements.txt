@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+requests
+openpyxl
+xlrd
+pymupdf
+python-multipart

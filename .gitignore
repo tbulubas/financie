@@ -1,0 +1,45 @@
+# === CITLIVÉ DÁTA — nikdy nesmú ísť do gitu ===
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+financie.db
+
+# bankové výpisy a exporty
+*.csv
+*.CSV
+*.xls
+*.xlsx
+*.XLS
+*.XLSX
+imports/
+data/
+exports/
+zalohy/
+backup*/
+
+# skeny a screenshoty výpisov
+*.pdf
+*.PDF
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# === IDE a OS ===
+.idea/
+.junie/
+.vscode/
+*.iml
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# === lokálne nastavenia ===
+.env
+*.local
