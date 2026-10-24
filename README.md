@@ -98,8 +98,26 @@ ollama pull gemma4:e4b
 ```
 
 Optionally also `ollama pull gemma4:26b-a4b-it-qat` — a more accurate 26B MoE
-model, 16 GB, for a GPU with enough VRAM. Without Ollama, CSV and Excel import
-still work; PDF/image import and AI categorization need it.
+model, about 15 GB, for a GPU with 16 GB of VRAM. Without Ollama, CSV and Excel
+import still work; PDF/image import and AI categorization need it.
+
+### Reference machine
+
+The project is developed and run on this laptop:
+
+| Component | Specification                                              |
+|-----------|------------------------------------------------------------|
+| GPU       | NVIDIA GeForce RTX 5080 Laptop GPU, 16 GB GDDR7 VRAM       |
+| CPU       | Intel Core Ultra 9 275HX, 24 cores                         |
+| RAM       | 64 GB DDR5-5600 (2 × 32 GB)                                |
+| Storage   | 2 TB NVMe SSD                                              |
+| OS        | Windows 11 Pro                                             |
+| Ollama    | 0.40.9                                                     |
+
+Both models run on the GPU: `gemma4:e4b` (8.9 GB) leaves plenty of VRAM
+free, `gemma4:26b-a4b-it-qat` (14.6 GB) just fits into the 16 GB. Smaller
+GPUs work with `gemma4:e4b`; without a GPU Ollama falls back to the CPU,
+which is much slower for PDF and image import.
 
 ## Usage
 
