@@ -1,18 +1,22 @@
 @echo off
+rem Copyright (c) 2026 Taras Bulubas. All rights reserved.
+rem Use requires prior written permission; see LICENSE.
+
+rem Double-click launcher: starts the app from the project's .venv.
 cd /d "%~dp0"
 
-rem Najdi Python: preferuj conda env "financie", potom base minicondu, potom PATH
-set PY=python
-if exist "%USERPROFILE%\miniconda3\envs\financie\python.exe" (
-    set "PY=%USERPROFILE%\miniconda3\envs\financie\python.exe"
-) else if exist "C:\ProgramData\miniconda3\envs\financie\python.exe" (
-    set "PY=C:\ProgramData\miniconda3\envs\financie\python.exe"
-) else if exist "%USERPROFILE%\miniconda3\python.exe" (
-    set "PY=%USERPROFILE%\miniconda3\python.exe"
+set "PY=.venv\Scripts\python.exe"
+if not exist "%PY%" (
+    echo .venv not found. Create it once in a terminal in this folder:
+    echo     make venv
+    echo or without make:
+    echo     py -3.12 -m venv .venv
+    echo     .venv\Scripts\python -m pip install -e ".[dev]"
+    pause
+    exit /b 1
 )
 
-echo Pouzivam Python: %PY%
-echo Spustam Financie na http://localhost:8500 ...
+echo Starting Financie at http://localhost:8500 ...
 start http://localhost:8500
-"%PY%" app.py
+"%PY%" -m financie
 pause

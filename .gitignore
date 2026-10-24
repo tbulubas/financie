@@ -1,4 +1,4 @@
-# === CITLIVÉ DÁTA — nikdy nesmú ísť do gitu ===
+# === SENSITIVE DATA — must never go into git ===
 *.db
 *.db-journal
 *.db-wal
@@ -6,7 +6,7 @@
 *.sqlite3
 financie.db
 
-# bankové výpisy a exporty
+# bank statements and exports
 *.csv
 *.CSV
 *.xls
@@ -19,27 +19,29 @@ exports/
 zalohy/
 backup*/
 
-# skeny a screenshoty výpisov
+# statement scans and screenshots
 *.pdf
 *.PDF
 
 # === Python ===
+/.venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
-.venv/
+.pytest_cache/
+.ipynb_checkpoints/
 venv/
 env/
 
-# === IDE a OS ===
-.idea/
-.junie/
+# === IDE and OS ===
+/.idea/
+/.junie/
 .vscode/
 *.iml
 Thumbs.db
 desktop.ini
 .DS_Store
 
-# === lokálne nastavenia ===
+# === local settings ===
 .env
 *.local

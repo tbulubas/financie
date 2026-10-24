@@ -1,16 +1,18 @@
-"""Import bankových výpisov: CSV/XLSX deterministicky, PDF a obrázky cez lokálnu Gemmu."""
+# Copyright (c) 2026 Taras Bulubas. All rights reserved.
+# Use requires prior written permission; see LICENSE.
+
+"""Bank statement import: CSV/XLSX deterministically, PDF and images via local Gemma."""
 import csv
 import io
 import re
 from datetime import datetime
 from pathlib import Path
 
-import db
-import gemma
+from financie import db, gemma
 
 IMG_EXT = {".png", ".jpg", ".jpeg", ".webp"}
 
-# Bežné názvy stĺpcov slovenských/českých bánk — skúsime najprv bez LLM
+# Common column names of Slovak/Czech/German banks — tried first, without the LLM
 COLUMN_ALIASES = {
     "date": ["dátum", "datum", "dátum valuty", "datum valuty", "dátum zaúčtovania",
              "datum zauctovania", "date", "booking date", "value date",
@@ -44,7 +46,7 @@ def _parse_amount(val) -> float | None:
     if not s or s in ("-", ""):
         return None
     s = s.replace(",", ".")
-    # nechaj len poslednú bodku ako desatinnú (1.234.56 -> 1234.56)
+    # keep only the last dot as the decimal separator (1.234.56 -> 1234.56)
     if s.count(".") > 1:
         parts = s.split(".")
         s = "".join(parts[:-1]) + "." + parts[-1]
@@ -117,7 +119,7 @@ def parse_csv(data: bytes) -> list[dict]:
     header = reader.fieldnames or []
     mapping = _auto_map(header)
     if "date" not in mapping or ("amount" not in mapping and "debit" not in mapping):
-        # neznámy formát -> nechá Gemmu namapovať stĺpce (lokálne)
+        # unknown format -> let Gemma map the columns (locally)
         if gemma.available():
             sample = [list(r.values()) for r in rows[:5]]
             try:
@@ -141,7 +143,7 @@ def _read_xlsx_rows(data: bytes) -> list[list[str]]:
 
 
 def _read_xls_rows(data: bytes) -> list[list[str]]:
-    """Starý binárny formát .xls (BIFF) — používajú ho napr. výpisy kreditných kariet."""
+    """Legacy binary .xls (BIFF) — used e.g. by credit card statements."""
     import xlrd
     wb = xlrd.open_workbook(file_contents=data)
     ws = wb.sheet_by_index(0)
@@ -150,12 +152,12 @@ def _read_xls_rows(data: bytes) -> list[list[str]]:
 
 
 def parse_xlsx(data: bytes) -> list[dict]:
-    # rozlíš podľa hlavičky súboru: OLE (D0CF11E0) = starý .xls, PK = .xlsx
+    # detect by file signature: OLE (D0CF11E0) = legacy .xls, PK = .xlsx
     if data[:4] == b"\xd0\xcf\x11\xe0":
         all_rows = _read_xls_rows(data)
     else:
         all_rows = _read_xlsx_rows(data)
-    # nájdi riadok s hlavičkou (prvý riadok, kde vieme namapovať dátum)
+    # find the header row (first row where date and amount can be mapped)
     header_idx, mapping = 0, {}
     for i, r in enumerate(all_rows[:20]):
         m = _auto_map(r)
@@ -185,13 +187,13 @@ def parse_pdf(data: bytes) -> list[dict]:
     text = "\n".join(page.get_text() for page in doc)
     if len(text.strip()) > 100:
         return gemma.extract_transactions(text=text)
-    # skenovaný PDF bez textovej vrstvy -> render stránok na obrázky pre vision
+    # scanned PDF without a text layer -> render pages to images for vision
     images = []
     for page in doc:
         pix = page.get_pixmap(dpi=150)
         images.append(pix.tobytes("png"))
     txs = []
-    for img in images:  # po stránkach, aby sa model nezahltil
+    for img in images:  # page by page so the model is not overloaded
         txs.extend(gemma.extract_transactions(images=[img]))
     return txs
 
@@ -210,11 +212,11 @@ def parse_file(filename: str, data: bytes) -> list[dict]:
         return parse_pdf(data)
     if ext in IMG_EXT:
         return parse_image(data)
-    raise ValueError(f"Nepodporovaný formát: {ext}")
+    raise ValueError(f"Unsupported format: {ext}")
 
 
 def _learned_category(con, tx: dict) -> int | None:
-    """Ak sme podobnú transakciu už kategorizovali, použi rovnakú kategóriu (bez LLM)."""
+    """If a similar transaction was categorized before, reuse its category (no LLM)."""
     for field in ("counterparty", "description"):
         val = (tx.get(field) or "").strip()
         if len(val) < 3:
@@ -251,7 +253,7 @@ def import_transactions(account_id: int, filename: str, txs: list[dict],
             inserted.append((tx_id, tx))
             if cat_id is None:
                 to_categorize.append((tx_id, tx))
-        except Exception:  # duplicitný import_hash
+        except Exception:  # duplicate import_hash
             skipped += 1
     con.commit()
 
@@ -265,7 +267,7 @@ def import_transactions(account_id: int, filename: str, txs: list[dict],
 
 
 def _gemma_batch_categorize(con, items: list[tuple[int, dict]], cat_by_name: dict) -> int:
-    """Kategorizuje dávky transakcií cez Gemmu. Chyby loguje do terminálu."""
+    """Categorize transactions in batches via Gemma. Errors are logged to the terminal."""
     names = list(cat_by_name.keys())
     categorized, batch = 0, 15
     total = (len(items) + batch - 1) // batch
@@ -279,14 +281,14 @@ def _gemma_batch_categorize(con, items: list[tuple[int, dict]], cat_by_name: dic
                                 (cat_by_name[cat_name], tx_id))
                     categorized += 1
             con.commit()
-            print(f"[kategorizácia] dávka {i//batch+1}/{total} OK")
+            print(f"[categorize] batch {i//batch+1}/{total} OK")
         except Exception as e:
-            print(f"[kategorizácia] dávka {i//batch+1}/{total} zlyhala: {e}")
+            print(f"[categorize] batch {i//batch+1}/{total} failed: {e}")
     return categorized
 
 
 def categorize_uncategorized(limit: int = 200) -> dict:
-    """Dodatočne zaradí nezaradené transakcie: najprv podľa naučených, zvyšok cez Gemmu."""
+    """Categorize uncategorized transactions: learned categories first, the rest via Gemma."""
     con = db.get_db()
     cat_by_name = {r["name"]: r["id"] for r in
                    con.execute("SELECT id, name FROM categories").fetchall()}

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "financie"
+version = "0.1.0"
+description = "Local-first personal finance manager: statement import, budgets and net worth (FastAPI + SQLite + local Gemma)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Taras Bulubas", email = "taras.bulubas@gmail.com" }]
+license = "LicenseRef-All-Rights-Reserved"
+license-files = ["LICENSE"]
+classifiers = ["Private :: Do Not Upload"]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "python-multipart>=0.0.9",
+    "requests>=2.31",
+    "openpyxl>=3.1",
+    "xlrd>=2.0",
+    "pymupdf>=1.24",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx2>=2.16"]
+
+[project.scripts]
+financie = "financie.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+financie = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,4 +1,8 @@
-"""Lokálna web appka na správu financií. Spustenie: python app.py -> http://localhost:8500"""
+# Copyright (c) 2026 Taras Bulubas. All rights reserved.
+# Use requires prior written permission; see LICENSE.
+
+"""Local personal finance web app. Run: python -m financie -> http://localhost:8500"""
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 
@@ -6,12 +10,17 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-import db
-import gemma
-import importer
+from financie import db, gemma, importer
 
-app = FastAPI(title="Financie")
-db.init_db()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # created on startup, not on import, so tests can point db.DB_PATH elsewhere first
+    db.init_db()
+    yield
+
+
+app = FastAPI(title="Financie", lifespan=lifespan)
 
 STATIC = Path(__file__).parent / "static"
 
@@ -26,7 +35,7 @@ def status():
     return {"gemma": gemma.available(), "model": gemma.MODEL}
 
 
-# ---------- Prehľad ----------
+# ---------- Overview ----------
 
 @app.get("/api/overview")
 def overview(date_from: str | None = None, date_to: str | None = None,
@@ -35,7 +44,7 @@ def overview(date_from: str | None = None, date_to: str | None = None,
         m = month or date.today().strftime("%Y-%m")
         date_from, date_to = m + "-01", m + "-31"
     con = db.get_db()
-    # prevody medzi účtami (kind='transfer') sa do príjmov/výdavkov nepočítajú
+    # transfers between accounts (kind='transfer') are excluded from income/expense
     inc, exp = con.execute("""
         SELECT COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount END), 0),
                COALESCE(SUM(CASE WHEN t.amount < 0 THEN t.amount END), 0)
@@ -60,7 +69,7 @@ def overview(date_from: str | None = None, date_to: str | None = None,
             "expense": round(exp, 2), "by_category": by_cat, "monthly": monthly}
 
 
-# ---------- Transakcie ----------
+# ---------- Transactions ----------
 
 @app.get("/api/transactions")
 def transactions(month: str | None = None, category_id: int | None = None,
@@ -118,7 +127,7 @@ def categorize(limit: int = 200):
     return importer.categorize_uncategorized(limit)
 
 
-# ---------- Číselníky ----------
+# ---------- Lookup tables ----------
 
 @app.get("/api/categories")
 def categories():
@@ -196,7 +205,7 @@ def delete_account(account_id: int):
     return {"ok": True}
 
 
-# ---------- Rozpočet ----------
+# ---------- Budget ----------
 
 @app.get("/api/budget")
 def budget(month: str | None = None):
@@ -235,7 +244,7 @@ def set_budget(b: BudgetIn):
     return {"ok": True}
 
 
-# ---------- Majetok / net worth ----------
+# ---------- Assets / net worth ----------
 
 @app.get("/api/networth")
 def networth():
@@ -305,8 +314,3 @@ async def import_file(account_id: int = Form(...), file: UploadFile = File(...))
     if not txs:
         raise HTTPException(400, {"code": "no_transactions"})
     return importer.import_transactions(account_id, file.filename, txs)
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8500)

@@ -29,7 +29,7 @@
   th { color:var(--muted); font-weight:500; }
   td.num { text-align:right; white-space:nowrap; }
   td.nowrap, th.nowrap { white-space:nowrap; }
-  /* pevné šírky stĺpcov v Transakciách, aby layout neskákal podľa obsahu */
+  /* fixed column widths in Transactions so the layout doesn't jump with content */
   #txTable { table-layout:fixed; }
   #txTable col.c-date { width:104px; } #txTable col.c-acct { width:132px; }
   #txTable col.c-cparty { width:22%; } #txTable col.c-cat { width:170px; }
@@ -356,7 +356,7 @@ function shiftPeriod(dir) {
   const nextDay = new Date(to); nextDay.setUTCDate(nextDay.getUTCDate() + 1);
   const isMonthEnd = nextDay.getUTCDate() === 1;
   if (isMonthStart && isMonthEnd) {
-    // celé kalendárne mesiace -> posun o rovnaký počet mesiacov
+    // whole calendar months -> shift by the same number of months
     const months = (to.getUTCFullYear()-from.getUTCFullYear())*12
                  + (to.getUTCMonth()-from.getUTCMonth()) + 1;
     const nf = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + dir*months, 1));

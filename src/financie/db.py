@@ -1,11 +1,17 @@
-"""SQLite databáza pre správu financií. Všetky dáta ostávajú lokálne v súbore financie.db."""
+# Copyright (c) 2026 Taras Bulubas. All rights reserved.
+# Use requires prior written permission; see LICENSE.
+
+"""SQLite database for personal finance. All data stays local in financie.db."""
 import os
 import sqlite3
 import hashlib
 from pathlib import Path
 
-# Cesta k databáze sa dá presunúť mimo tohto priečinka: set FINANCIE_DB=C:\Financie\financie.db
-DB_PATH = Path(os.environ.get("FINANCIE_DB", Path(__file__).parent / "financie.db"))
+# project root (src/financie/db.py -> ../..); the package is installed in editable mode
+PROJECT_DIR = Path(__file__).resolve().parents[2]
+
+# The database can live outside this folder: set FINANCIE_DB=C:\Financie\financie.db
+DB_PATH = Path(os.environ.get("FINANCIE_DB", PROJECT_DIR / "financie.db"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -20,20 +26,20 @@ CREATE TABLE IF NOT EXISTS accounts (
 CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    kind TEXT NOT NULL DEFAULT 'expense'         -- expense / income
+    kind TEXT NOT NULL DEFAULT 'expense'         -- expense / income / transfer
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY,
     account_id INTEGER NOT NULL REFERENCES accounts(id),
     date TEXT NOT NULL,                          -- ISO YYYY-MM-DD
-    amount REAL NOT NULL,                        -- + príjem, - výdavok
+    amount REAL NOT NULL,                        -- + income, - expense
     currency TEXT NOT NULL DEFAULT 'EUR',
     description TEXT,
     counterparty TEXT,
     category_id INTEGER REFERENCES categories(id),
     source_file TEXT,
-    import_hash TEXT UNIQUE,                     -- deduplikácia pri opakovanom importe
+    import_hash TEXT UNIQUE,                     -- dedup on repeated imports
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
@@ -42,7 +48,7 @@ CREATE INDEX IF NOT EXISTS idx_tx_cat ON transactions(category_id);
 CREATE TABLE IF NOT EXISTS budgets (
     id INTEGER PRIMARY KEY,
     category_id INTEGER NOT NULL REFERENCES categories(id),
-    month TEXT NOT NULL DEFAULT '*',             -- 'YYYY-MM' alebo '*' = každý mesiac
+    month TEXT NOT NULL DEFAULT '*',             -- 'YYYY-MM' or '*' = every month
     amount REAL NOT NULL,
     UNIQUE(category_id, month)
 );
@@ -59,7 +65,7 @@ CREATE TABLE IF NOT EXISTS asset_values (
     id INTEGER PRIMARY KEY,
     asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
     date TEXT NOT NULL,
-    value REAL NOT NULL,                         -- záporné pre záväzky (hypotéka, úver)
+    value REAL NOT NULL,                         -- negative for liabilities (mortgage, loan)
     UNIQUE(asset_id, date)
 );
 """

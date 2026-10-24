@@ -1,5 +1,8 @@
-"""Klient pre lokálny model Gemma cez Ollama API (http://localhost:11434).
-Žiadne dáta neopúšťajú tvoj počítač.
+# Copyright (c) 2026 Taras Bulubas. All rights reserved.
+# Use requires prior written permission; see LICENSE.
+
+"""Client for the local Gemma model via the Ollama API (http://localhost:11434).
+No data leaves your machine.
 """
 import base64
 import json
@@ -18,8 +21,8 @@ TX_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "date": {"type": "string", "description": "ISO formát YYYY-MM-DD"},
-                    "amount": {"type": "number", "description": "záporné = výdavok, kladné = príjem"},
+                    "date": {"type": "string", "description": "ISO format YYYY-MM-DD"},
+                    "amount": {"type": "number", "description": "negative = expense, positive = income"},
                     "currency": {"type": "string"},
                     "description": {"type": "string"},
                     "counterparty": {"type": "string"},
@@ -55,23 +58,23 @@ def chat(prompt: str, images: list[bytes] | None = None, json_schema: dict | Non
 
 
 def extract_transactions(text: str = "", images: list[bytes] | None = None) -> list[dict]:
-    """Vytiahne transakcie z textu výpisu alebo z obrázkov (screenshot, sken, PDF stránka)."""
+    """Extract transactions from statement text or images (screenshot, scan, PDF page)."""
     prompt = (
-        "Si asistent na spracovanie bankových výpisov. Zo vstupu vytiahni VŠETKY transakcie. "
-        "Pravidlá: dátum vždy ako YYYY-MM-DD. Suma ako číslo: výdavok/odpísanie záporné, "
-        "príjem/pripísanie kladné. Desatinná čiarka znamená desatinnú bodku (1 234,56 -> 1234.56). "
-        "Ak mena nie je uvedená, použi EUR. Nič si nevymýšľaj — extrahuj len to, čo je vo vstupe.\n\n"
+        "You are an assistant that processes bank statements. Extract ALL transactions from the input. "
+        "Rules: date always as YYYY-MM-DD. Amount as a number: expense/debit negative, "
+        "income/credit positive. A decimal comma means a decimal point (1 234,56 -> 1234.56). "
+        "If no currency is given, use EUR. Do not invent anything — extract only what is in the input.\n\n"
     )
     if text:
-        prompt += f"Výpis:\n{text}"
+        prompt += f"Statement:\n{text}"
     else:
-        prompt += "Transakcie sú na priložených obrázkoch."
+        prompt += "The transactions are in the attached images."
     out = chat(prompt, images=images, json_schema=TX_SCHEMA)
     return json.loads(out).get("transactions", [])
 
 
 def map_csv_columns(header: list[str], sample_rows: list[list[str]]) -> dict:
-    """Požiada model o mapovanie stĺpcov neznámeho CSV na naše polia."""
+    """Ask the model to map the columns of an unknown CSV to our fields."""
     schema = {
         "type": "object",
         "properties": {
@@ -83,22 +86,22 @@ def map_csv_columns(header: list[str], sample_rows: list[list[str]]) -> dict:
             "counterparty": {"type": ["string", "null"]},
             "currency": {"type": ["string", "null"]},
             "date_format": {"type": ["string", "null"],
-                            "description": "Python strptime formát, napr. %d.%m.%Y"},
+                            "description": "Python strptime format, e.g. %d.%m.%Y"},
         },
         "required": ["date", "description"],
     }
     prompt = (
-        "Toto je hlavička a ukážkové riadky CSV exportu z banky. Priraď názvy stĺpcov "
-        "k poliam: date, amount (jedna suma so znamienkom), alebo debit + credit (oddelené stĺpce), "
-        "description, counterparty, currency. Vráť presné názvy stĺpcov z hlavičky, "
-        "null ak stĺpec neexistuje. Urči aj date_format (strptime).\n\n"
-        f"Hlavička: {header}\nRiadky: {sample_rows[:5]}"
+        "This is the header and sample rows of a bank CSV export. Map the column names "
+        "to the fields: date, amount (a single signed amount), or debit + credit (separate columns), "
+        "description, counterparty, currency. Return the exact column names from the header, "
+        "null if a column does not exist. Also determine date_format (strptime).\n\n"
+        f"Header: {header}\nRows: {sample_rows[:5]}"
     )
     return json.loads(chat(prompt, json_schema=schema))
 
 
 def categorize(transactions: list[dict], categories: list[str]) -> list[str]:
-    """Priradí kategóriu každej transakcii. Vracia zoznam názvov kategórií v rovnakom poradí."""
+    """Assign a category to each transaction. Returns category names in the same order."""
     schema = {
         "type": "object",
         "properties": {
@@ -110,13 +113,13 @@ def categorize(transactions: list[dict], categories: list[str]) -> list[str]:
              f"{t.get('description','')} | {t.get('counterparty','')}"
              for i, t in enumerate(transactions)]
     prompt = (
-        f"Priraď každej transakcii jednu kategóriu z tohto zoznamu: {categories}. "
-        "Kladné sumy sú príjmy, záporné výdavky. Vráť pole 'categories' s presne "
-        f"{len(transactions)} položkami v rovnakom poradí ako transakcie.\n\n" + "\n".join(lines)
+        f"Assign each transaction exactly one category from this list: {categories}. "
+        "Positive amounts are income, negative are expenses. Return a 'categories' array with exactly "
+        f"{len(transactions)} items in the same order as the transactions.\n\n" + "\n".join(lines)
     )
     out = json.loads(chat(prompt, json_schema=schema))
     cats = out.get("categories", [])
-    # doplň fallback, ak model vráti menej položiek
+    # pad with a fallback if the model returns fewer items
     while len(cats) < len(transactions):
         cats.append(categories[-1] if categories else "")
     return cats[: len(transactions)]
