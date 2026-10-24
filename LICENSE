@@ -1,0 +1,29 @@
+Copyright (c) 2026 Taras Bulubas <taras.bulubas@gmail.com>
+All rights reserved.
+
+This repository and everything in it - source code, documentation, images
+and any other content (the "Work") - is the exclusive property of the
+copyright holder.
+
+The Work is published for viewing only. No license or other right is granted,
+whether expressly, by implication or otherwise. In particular, without the
+prior written permission of the copyright holder you may not:
+
+  - use, run or execute the Work or any part of it, for any purpose,
+    commercial or non-commercial;
+  - copy, reproduce, modify, translate or create derivative works of the Work
+    or any part of it;
+  - distribute, publish, sublicense, sell or otherwise make the Work or any
+    part of it available to third parties;
+  - use the Work or any part of it to train, fine-tune or evaluate machine
+    learning models.
+
+Viewing the Work on GitHub, and forking it on GitHub to the extent required
+by the GitHub Terms of Service, does not grant any of the rights above.
+
+To request permission, contact the copyright holder at
+taras.bulubas@gmail.com. Permission is only valid if given in writing.
+
+THE WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE WORK.
