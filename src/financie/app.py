@@ -52,11 +52,12 @@ def overview(date_from: str | None = None, date_to: str | None = None,
         WHERE t.date BETWEEN ? AND ? AND COALESCE(c.kind,'') != 'transfer'""",
         (date_from, date_to)).fetchone()
     by_cat = [dict(r) for r in con.execute("""
-        SELECT COALESCE(c.name,'—') AS category, ROUND(SUM(-t.amount),2) AS spent
+        SELECT COALESCE(c.name,'—') AS category, c.key AS category_key,
+               ROUND(SUM(-t.amount),2) AS spent
         FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
         WHERE t.date BETWEEN ? AND ? AND t.amount < 0
           AND COALESCE(c.kind,'') != 'transfer'
-        GROUP BY c.name ORDER BY spent DESC""", (date_from, date_to))]
+        GROUP BY c.id ORDER BY spent DESC""", (date_from, date_to))]
     monthly = [dict(r) for r in con.execute("""
         SELECT substr(t.date,1,7) AS month,
                ROUND(SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END),2) AS income,
@@ -75,7 +76,7 @@ def overview(date_from: str | None = None, date_to: str | None = None,
 def transactions(month: str | None = None, category_id: int | None = None,
                  account_id: int | None = None, uncategorized: bool = False,
                  q: str | None = None, limit: int = 500):
-    sql = """SELECT t.*, c.name AS category, a.name AS account
+    sql = """SELECT t.*, c.name AS category, c.key AS category_key, a.name AS account
              FROM transactions t
              LEFT JOIN categories c ON c.id = t.category_id
              JOIN accounts a ON a.id = t.account_id WHERE 1=1"""
@@ -178,7 +179,7 @@ def accounts():
 
 class AccountIn(BaseModel):
     name: str
-    type: str = "bezny"
+    type: str = "checking"
     currency: str = "EUR"
     opening_balance: float = 0
 
@@ -212,7 +213,7 @@ def budget(month: str | None = None):
     month = month or date.today().strftime("%Y-%m")
     con = db.get_db()
     rows = [dict(r) for r in con.execute("""
-        SELECT c.id AS category_id, c.name AS category,
+        SELECT c.id AS category_id, c.name AS category, c.key AS category_key,
                COALESCE(bm.amount, ba.amount) AS budget,
                ROUND(COALESCE((SELECT SUM(-t.amount) FROM transactions t
                      WHERE t.category_id = c.id AND t.amount < 0
@@ -260,7 +261,7 @@ def networth():
 
 class AssetIn(BaseModel):
     name: str
-    type: str = "ine"
+    type: str = "other"
     currency: str = "EUR"
     note: str = ""
 
@@ -308,9 +309,38 @@ async def import_file(account_id: int = Form(...), file: UploadFile = File(...))
     if needs_gemma and not gemma.available():
         raise HTTPException(400, {"code": "ollama_missing"})
     try:
-        txs = importer.parse_file(file.filename, data)
+        txs, fmt = importer.parse_statement(file.filename, data)
     except Exception as e:
         raise HTTPException(400, {"code": "parse_failed", "info": str(e)})
     if not txs:
         raise HTTPException(400, {"code": "no_transactions"})
-    return importer.import_transactions(account_id, file.filename, txs)
+    result = importer.import_transactions(account_id, file.filename, txs)
+    key = _describe(file.filename, data)["key"]
+    if key:  # next time a file from this source goes to this account by itself
+        con = db.get_db()
+        db.remember_source(con, key, account_id)
+        con.close()
+    return {"format": fmt, **result}
+
+
+def _describe(filename: str, data: bytes) -> dict:
+    try:
+        return importer.describe_statement(filename, data)
+    except Exception as e:
+        return {"file": filename, "key": None, "error": str(e)}
+
+
+@app.post("/api/import/preview")
+async def import_preview(files: list[UploadFile] = File(...)):
+    """For each file: format, period, count and the account it should go to. Writes nothing."""
+    con = db.get_db()
+    accounts_by_name = {r["name"]: r["id"] for r in con.execute("SELECT id, name FROM accounts")}
+    out = []
+    for f in files:
+        d = _describe(f.filename, await f.read())
+        proposal = d.get("proposal")
+        d["account_id"] = (db.source_account(con, d.get("key"))
+                           or (accounts_by_name.get(proposal["name"]) if proposal else None))
+        out.append(d)
+    con.close()
+    return out

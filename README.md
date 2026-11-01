@@ -128,10 +128,35 @@ make run
 or double-click `start.bat` (it uses `.venv` and opens the browser). Both run
 `python -m financie` and serve `http://localhost:8500`.
 
-- **Import** — download a statement from your bank (CSV/XLSX ideally; PDF or a screenshot also works) and upload it on the *Import* tab. Duplicates are skipped, so overlapping imports are safe.
+- **Import** — download statements from your banks (CSV/XLS/XLSX ideally; PDF or a screenshot also works) and select all of them at once on the *Import* tab. The app shows for every file the bank, period and number of transactions and picks the account it belongs to — it remembers that from earlier imports and proposes a new account for a new source. Duplicates are skipped, so overlapping statements are safe.
 - **Transactions** — review the automatic categories and fix what is needed. The app remembers your corrections: next time it assigns the same counterparty by itself, without AI.
 - **Budget** — set monthly limits per category (Enter saves).
 - **Assets** — add assets (apartment, ETF, crypto…) and liabilities (mortgage — enter a negative value). Record the current valuation from time to time; the chart shows how your net worth develops.
+
+### Which format is this file?
+
+```bash
+.venv/Scripts/python -m financie inspect C:\Users\me\Downloads
+```
+
+lists every statement in a folder (or the given files) with its format,
+encoding, header row, column names, the shape of the first values and whether
+the importer recognizes it:
+
+```
+== umsaetze.csv
+format:   CSV, encoding cp1250, delimiter ';'
+header:   row 1 (0 rows above it)
+columns:  Auftragskonto | Buchungstag | Valutadatum | … | Betrag | Waehrung | Info
+mapping:  date=Buchungstag, amount=Betrag, description=Verwendungszweck, …
+shape:    <text> | <date:%d.%m.%Y> | <date:%d.%m.%Y> | … | -99,99 | <text> | <text>
+rows:     120, parsed 120, 2026-01-01 .. 2026-03-31
+status:   ok
+```
+
+Values appear only as shapes (`<date:…>`, `-9.999,99`, `<text>`, `<iban>`),
+never as content, so the report can be shared to get a new bank format added.
+Check the file names before sharing — some banks put the account number there.
 
 ## Privacy
 

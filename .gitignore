@@ -23,6 +23,9 @@ backup*/
 *.pdf
 *.PDF
 
+# saved `financie inspect` reports: file names can contain account numbers
+*.out
+
 # === Python ===
 /.venv/
 __pycache__/

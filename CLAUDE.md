@@ -8,8 +8,11 @@ is the reason this project exists — treat it as non-negotiable.
 
 - **Never read `financie.db`, `imports/`, `*.csv`, `*.xls*` or statement PDFs.**
   They contain the user's real bank data. Work on the code, not the data.
-- If a parsing bug needs real input, ask the user to paste the **header row
-  only**, or to provide an anonymized sample — do not open the file yourself.
+- If a parsing bug needs real input, ask the user to run
+  `.venv\Scripts\python -m financie inspect <file or folder>` and paste the
+  output: it shows format, encoding, column names and value *shapes* only
+  (`<date:%d.%m.%Y>`, `-9.999,99`, `<text>`), never content. Do not run it on
+  the user's files yourself and do not open the files.
 - Never add real transaction data to tests, fixtures or commits. Invent samples.
 - `.gitignore` blocks the database, statements and `.idea/` — keep it that way.
   Before any commit, confirm `git status` shows code files only.
@@ -52,15 +55,34 @@ pytest, shared IntelliJ run configs, copyright header in every source file.
   AI categorization is user-triggered via `POST /api/categorize`.
 - **Learned categories beat the LLM.** `_learned_category()` reuses the user's
   own past corrections by counterparty/description — check it before any AI call.
-- **Dedup** via `import_hash` (account + date + amount + description).
+- **Dedup** via `import_hash` (account + date + amount + description, plus the
+  source's own reference such as the PayPal transaction code when there is one).
+- **Several files at once.** `POST /api/import/preview` runs
+  `describe_statement()` on each file (format, period, count, source key and a
+  proposed account; no writes, no Gemma), the UI then imports file by file via
+  `POST /api/import`. A successful import stores source key → account in
+  `account_sources`, so the next download of the same source is assigned by
+  itself. Source keys never contain an account number in clear (`_hashed()`).
 - **i18n:** all UI strings live in the `I18N` object in `index.html` (sk/de/en).
   Add every new string to all three. Backend returns error *codes*
   (`{"code": "..."}`), never user-facing text; the frontend translates them.
 - **Language:** talk to the user in Slovak. All code, comments, docstrings,
   log messages, LLM prompts, the README and other docs are in English.
-  Exceptions: the `sk`/`de` UI strings in `I18N`, and values stored in the DB
-  (default category names, `accounts.type` / `assets.type` codes such as
-  `bezny`, `ine`) — renaming those would break existing data.
+  The database is English too: `accounts.type` / `assets.type` codes
+  (`checking`, `credit_card`, `liability`, …) and default category names.
+  Only the `sk`/`de` UI strings in `I18N` and the users' own data (bank texts,
+  their own account and category names) stay in other languages.
+- **Default categories** have a stable `categories.key` (`groceries`,
+  `transfer`, …); the UI shows `cat_<key>` from `I18N` via `catLabel()` and
+  falls back to `name` for user-defined categories (`key IS NULL`). A new
+  default category needs a key in `DEFAULT_CATEGORIES` and `cat_<key>` in all
+  three languages.
+- **Schema changes go through migrations.** `PRAGMA user_version` holds the
+  version (`SCHEMA_VERSION` in `db.py`); `init_db()` backs the database up next
+  to itself (`<stem>-backup-v<old>-<timestamp>.db`) and then runs the
+  migration steps. Never require the user to re-import; keep row ids so
+  categorized transactions, budgets and learned categories survive. Test each
+  migration on an invented old-layout database (see `tests/test_migration.py`).
 - Transactions in a category with `kind='transfer'` are excluded from income
   and expense totals (used for credit-card settlements).
 
@@ -83,6 +105,19 @@ built inline in the tests (`*.csv`/`*.xlsx` files are gitignored anyway).
 
 ## Known data sources
 
-- German bank CSV-CAMT V2 export (German headers, `;`, cp1252, `dd.mm.yyyy`, `1.234,56`)
-- Credit card statement — legacy BIFF `.xls` (OLE), header row ~11, preamble rows above
-- PDF and screenshots — parsed by Gemma (vision for scans without a text layer)
+Recognized by their columns in `PROFILES` (`importer.py`); the label shows in
+`inspect` and in the import result.
+
+- German savings bank (Sparkasse) — CSV-CAMT V2, camt52v8 and MT940 CSV
+  (`;`, cp1250/UTF-8, `dd.mm.yy`, `1.234,56`). Rows with Info "Umsatz
+  vorgemerkt" (pending) are left out. The formats word the same movement
+  differently, so dedup does not catch them across formats: the import reports
+  `possible_duplicates` instead.
+- PayPal activity CSV (DE, `,`, `dd.mm.yyyy`). Only completed EUR rows that move
+  the balance (no "Memo"); EUR currency-conversion rows take the payee of the
+  related payment; funding from bank/card is a transfer, and
+  `_link_paypal_transfers()` marks the matching bank debit as a transfer too.
+  The transaction code goes into the dedup hash (`ref`).
+- Credit card CSV "Umsatz getätigt von … Buchungsbetrag" (`;`, cp1250, `dd.mm.yy`).
+- Amazon Visa — legacy BIFF `.xls`, header row 11, preamble rows above.
+- PDF and screenshots — parsed by Gemma (vision for scans without a text layer).

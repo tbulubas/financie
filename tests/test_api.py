@@ -3,8 +3,8 @@
 
 """API behaviour against a throwaway database. All sample rows are invented."""
 
-TRANSFER = "Prevod medzi účtami"
-GROCERIES = "Potraviny"
+TRANSFER = "Transfer between accounts"
+GROCERIES = "Groceries"
 
 
 def csv_bytes(*rows: str) -> bytes:
@@ -77,8 +77,8 @@ def test_error_codes(client, account_id):
 
 
 def test_net_worth_includes_liabilities(client):
-    client.post("/api/assets", json={"name": "Byt", "type": "nehnutelnost"})
-    client.post("/api/assets", json={"name": "Hypotéka", "type": "zavazok"})
+    client.post("/api/assets", json={"name": "Byt", "type": "real_estate"})
+    client.post("/api/assets", json={"name": "Hypotéka", "type": "liability"})
     assets = {a["name"]: a["id"] for a in client.get("/api/networth").json()["assets"]}
     client.post("/api/asset_values", json={"asset_id": assets["Byt"], "date": "2026-01-01", "value": 200000})
     client.post("/api/asset_values", json={"asset_id": assets["Hypotéka"], "date": "2026-01-01", "value": -150000})
