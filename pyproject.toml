@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Local-first personal finance manager: statement import, budgets and net worth (FastAPI + SQLite + local Gemma)"
 readme = "README.md"
 requires-python = ">=3.11"
-authors = [{ name = "Taras Bulubas", email = "taras.bulubas@gmail.com" }]
+authors = [{ name = "Taras Bulubas" }]
 license = "LicenseRef-All-Rights-Reserved"
 license-files = ["LICENSE"]
 classifiers = ["Private :: Do Not Upload"]

@@ -14,6 +14,11 @@ is the reason this project exists — treat it as non-negotiable.
   (`<date:%d.%m.%Y>`, `-9.999,99`, `<text>`), never content. Do not run it on
   the user's files yourself and do not open the files.
 - Never add real transaction data to tests, fixtures or commits. Invent samples.
+- Screenshots for the README come from the demo (`make demo`, `demo.py`) only —
+  never from the user's own app. The demo sets `db.DB_PATH` / `db.IMPORTS_DIR` to a
+  new temporary folder, so it cannot touch the real database. Keep the folder path,
+  the user name and browser add-ons out of the pictures.
+- The README and LICENSE write the e-mail as `taras.bulubas [at] gmail.com`.
 - `.gitignore` blocks the database, statements (also `*.xml` / `*.zip` for CAMT, except
   `.run/*.xml`) and `.idea/` — keep it that way.
   Before any commit, confirm `git status` shows code files only.
@@ -43,6 +48,8 @@ pytest, shared IntelliJ run configs, copyright header in every source file.
 | `src/financie/importer.py` | statement parsing (CSV/XLSX/XLS/PDF/images), dedup, categorization |
 | `src/financie/gemma.py` | Ollama client — structured JSON output, vision for scans |
 | `src/financie/cli.py` | `python -m financie [--host] [--port]` |
+| `src/financie/demo.py` | `python -m financie demo` / `make demo`: invented data in a new temp folder |
+| `docs/images/` | README screenshots, taken from the demo only |
 | `src/financie/static/index.html` | entire frontend: markup, CSS, JS, i18n |
 | `src/financie/static/vendor/` | Chart.js 4.4.4 and its licence, served under `/static` |
 | `tests/` | pytest suite; `conftest.py` gives every test a temp DB and disables Ollama |

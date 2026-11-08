@@ -3,15 +3,71 @@
 Everything runs on your own computer. No bank connection, no data sent to third parties.
 You download statements manually from internet banking and import them here.
 
+![Overview: income, expenses by category, monthly trend and the balance of every account over time](docs/images/overview.png)
+
+<sub>All names and amounts in the screenshots are invented — they come from the demo
+(`make demo`), never from real bank data.</sub>
+
+**Made for German banks.** The recognized formats are those of German banks and
+services (Sparkasse CSV and CAMT, PayPal DE, German credit cards), so the bank
+texts in the screenshots — *Kartenzahlung*, *Miete*, *Dauerauftrag* — are German,
+as they would be in your own statements. The interface itself is in English,
+German or Slovak (switch at the top right). Other banks work when their CSV or
+Excel columns have usual names, and CAMT is the European (ISO 20022) standard
+that many banks offer as an export.
+
 ## How it works
 
 - **SQLite database** (`financie.db`) — all data in a single file in the project folder. Back it up.
 - **Web app** — runs at `http://localhost:8500`, for you only.
-- **Gemma via Ollama** — a local AI model reads PDF statements, screenshots and scans, and categorizes transactions. CSV, Excel and CAMT (XML) files are parsed directly by code, without AI.
+- **Gemma via Ollama (optional)** — a local AI model reads PDF statements, screenshots and scans, and suggests categories. CSV, Excel and CAMT (XML) files are parsed directly by code, without AI. All money math — totals, balances, checks — is plain code; the AI never computes it.
+
+### Do I need the local AI?
+
+No, not for the main use. Financie works without Ollama; the header shows
+whether Gemma is ready.
+
+| Without Gemma (no Ollama) | Needs Gemma |
+|---|---|
+| Import of CSV, Excel and CAMT (XML/ZIP) statements of the recognized formats, and of other CSV/Excel files whose columns have usual names (date, amount, description …) | Import of **PDF** statements and of **screenshots or scans** |
+| Dedup, transfers, known balances, balance checks, charts, budget, assets | A CSV/Excel layout whose columns the app cannot match by name (Gemma maps them) |
+| Categories: you assign them, and the app **learns** from you — the next movement with the same counterparty gets the same category by itself, on import already | **🤖 Recategorize**: suggestions for movements the app has not learned yet |
+
+So with CSV or CAMT exports from your bank you can skip Ollama entirely and
+categorize by hand at first; the learned categories soon cover most of the
+regular payments. A machine without a strong GPU is fine for that. Gemma helps
+when a bank offers only PDFs, and to get through a long uncategorized history
+quickly.
+
+## Screenshots
+
+| Import | Transactions |
+|---|---|
+| ![The statements folder: every file with its bank, period, account and state](docs/images/import.png) | ![Transactions of one account with categories and the balance after each movement](docs/images/transactions.png) |
+| Every statement in the folder with its bank, period and account; nothing is imported before GO, and a file already imported is recognized by its content. | Categories you fix are learned; with one account chosen, every movement shows the balance after it, as in online banking. |
+
+| Assets |  |
+|---|---|
+| ![Assets and liabilities with the net worth trend](docs/images/assets.png) | Accounts, assets and liabilities add up to the net worth; record a valuation now and then and the chart shows how it develops. |
+
+## Try it with invented data
+
+```bash
+make demo
+```
+
+starts the app at `http://localhost:8501` on a throwaway database in a new
+temporary folder, filled with invented accounts (a current account with CAMT
+statements, a savings account and a credit card), a year of movements,
+balance checks, budgets and assets. Your own database and statements folder
+are never touched. The statements folder of the demo holds one CSV left to
+import: pressing GO shows that movements already imported as CAMT are not
+added twice. Running Financie, the demo included, needs my permission — see
+[License](#license).
 
 ## Author
 
-**Taras Bulubas** — taras.bulubas@gmail.com
+**Taras Bulubas** — taras.bulubas [at] gmail.com
 
 **Use of AI.** Claude (an AI assistant by Anthropic) was used to help write
 the code and the documentation, following my specifications and decisions.
@@ -66,6 +122,7 @@ the base interpreter is found with the py launcher (`py -3.12`), elsewhere as
 | `make venv`          | create `.venv` and install the project with all extras     |
 | `make test`          | run the tests with pytest                                  |
 | `make run`           | start the app at `http://localhost:8500`; another port with `ARGS="--port 8501"` |
+| `make demo`          | try the app on invented data at `http://localhost:8501` (your database is not used) |
 | `make clean`         | remove caches and build metadata                           |
 | `make distclean`     | `clean` and remove `.venv`                                 |
 | `make recreate`      | `distclean`, then `venv` — a fresh environment             |
@@ -98,8 +155,8 @@ ollama pull gemma4:e4b
 ```
 
 Optionally also `ollama pull gemma4:26b-a4b-it-qat` — a more accurate 26B MoE
-model, about 15 GB, for a GPU with 16 GB of VRAM. Without Ollama, CSV and Excel
-import still work; PDF/image import and AI categorization need it.
+model, about 15 GB, for a GPU with 16 GB of VRAM. Ollama is optional — see
+[Do I need the local AI?](#do-i-need-the-local-ai).
 
 ### Reference machine
 
@@ -341,12 +398,13 @@ src/financie/
   db.py               schema, connection, balance and net-worth queries
   importer.py         statement parsing (CSV/XLSX/XLS/PDF/images), dedup, categorization
   gemma.py            Ollama client: structured JSON output, vision for scans
-  cli.py              command line interface (python -m financie)
+  cli.py              command line interface (python -m financie, inspect, demo)
+  demo.py             invented accounts, statements and assets for the demo
   static/index.html   the whole frontend: markup, CSS, JS, i18n
   static/vendor/      Chart.js 4.4.4 with its MIT licence (no CDN)
 tests/                parsing and API tests with invented data
 scripts/              check_venv.py guards the Python version
-docs/                 IntelliJ setup
+docs/                 IntelliJ setup; images/ holds the README screenshots (demo data)
 .run/                 shared IntelliJ run configurations
 Makefile              environment and task shortcuts
 start.bat             double-click launcher
@@ -362,5 +420,8 @@ This repository — code, documentation and images — is published for viewing
 only. Using, running, copying, modifying or distributing any part of it
 requires my prior written permission.
 
-See [LICENSE](LICENSE) for the full terms. To ask for permission, write to
-taras.bulubas@gmail.com.
+See [LICENSE](LICENSE) for the full terms.
+
+**Would you like to use Financie?** I am glad to let people use it — ask me
+first by e-mail at **taras.bulubas [at] gmail.com** (replace ` [at] ` with `@`), say briefly
+what you would like to use it for, and you will get my answer in writing.

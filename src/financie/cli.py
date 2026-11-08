@@ -1,7 +1,8 @@
 # Copyright (c) 2026 Taras Bulubas. All rights reserved.
 # Use requires prior written permission; see LICENSE.
 
-"""Command line interface: start the local web app, or inspect statement files."""
+"""Command line interface: start the local web app, try it on invented data, or inspect
+statement files."""
 
 from __future__ import annotations
 
@@ -39,10 +40,17 @@ def main(argv: list[str] | None = None) -> None:
     p_inspect = sub.add_parser(
         "inspect", help="show the structure of statement files (columns, formats), not their content")
     p_inspect.add_argument("paths", nargs="+", help="files or folders")
+    p_demo = sub.add_parser(
+        "demo", help="try the app on invented data in a temporary folder (your database is not used)")
+    p_demo.add_argument("--port", type=int, default=8501, help="port (default 8501)")
     args = parser.parse_args(argv)
 
     if args.command == "inspect":
         inspect(args.paths)
+        return
+    if args.command == "demo":
+        from financie import demo
+        demo.run(args.host, args.port)
         return
 
     import uvicorn

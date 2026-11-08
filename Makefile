@@ -9,6 +9,7 @@
 #   make venv      create .venv and install the project with all extras
 #   make test      run the tests
 #   make run       start the web app at http://localhost:8500 (override with ARGS="...")
+#   make demo      try the app on invented data at http://localhost:8501
 #
 # The project uses Python 3.12 (PYTHON_VERSION). The base interpreter is found
 # with the py launcher on Windows and as python3.12 elsewhere, independently of
@@ -31,13 +32,14 @@ STAMP := .venv/.installed
 ARGS ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help venv test run clean distclean recreate
+.PHONY: help venv test run demo clean distclean recreate
 
 help:
 	@echo Targets:
 	@echo   make venv       create .venv and install the project with all extras
 	@echo   make test       run the tests with pytest
 	@echo   make run        start the web app at http://localhost:8500; options with ARGS="--port ..."
+	@echo   make demo       try the app on invented data at http://localhost:8501 (your database is not used)
 	@echo   make clean      remove caches and build metadata
 	@echo   make distclean  clean and remove .venv
 	@echo   make recreate   distclean, then venv
@@ -66,6 +68,9 @@ test: $(STAMP)
 
 run: $(STAMP)
 	$(VENV_PY) -m financie $(ARGS)
+
+demo: $(STAMP)
+	$(VENV_PY) -m financie demo $(ARGS)
 
 clean:
 	$(PYTHON) -c "import glob, shutil; [shutil.rmtree(p, ignore_errors=True) for p in ['.pytest_cache', 'build', *glob.glob('src/*.egg-info'), *glob.glob('*/**/__pycache__', recursive=True)]]"

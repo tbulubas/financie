@@ -16,7 +16,7 @@
   nav button.active { color:var(--text); background:var(--card); }
   .hright { margin-left:auto; display:flex; align-items:center; gap:12px; }
   #gemmaStatus { font-size:13px; color:var(--muted); }
-  main { padding:24px; max-width:1100px; margin:0 auto; }
+  main { padding:24px; max-width:1240px; margin:0 auto; }   /* the import table needs the width */
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:24px; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px; }
   .card .label { color:var(--muted); font-size:13px; margin-bottom:6px; }
@@ -299,8 +299,8 @@ sk: {
   add_btn:'Pridať', save_valuation:'Uložiť ocenenie',
   del_asset_confirm:'Vymazať aktívum aj s históriou ocenení?', del_tx_confirm:'Vymazať transakciu?',
   at_real_estate:'Nehnuteľnosť', at_stocks:'Akcie', at_crypto:'Krypto', at_pension:'Dôchodkové sporenie',
-  at_liability:'Záväzok (úver)', at_other:'Iné',
-  import_info:'Appka prezrie tvoj priečinok s výpismi (CSV, XLS/XLSX, PDF, obrázky) a pri každom súbore ukáže, čo je zač — banku, obdobie, počet pohybov, účet — a či už bol importovaný. Súbory spozná podľa obsahu, takže ani premenovaná kópia sa nenaimportuje druhýkrát. Import sa spustí až tlačidlom GO; duplicitné pohyby sa preskočia.<br>PDF a obrázky číta lokálna Gemma (musí bežať Ollama) — trvá to dlho, preto nie sú zaškrtnuté automaticky.<br>Platby cez PayPal z banky a splátky karty sa nepočítajú do výdavkov dvakrát, keď sú v kategórii „Prevod medzi účtami“.',
+  at_liability:'Záväzok (úver)', at_other:'Iné', at_etf:'ETF',
+  import_info:'Appka prezrie tvoj priečinok s výpismi (CSV, XLS/XLSX, CAMT XML/ZIP, PDF, obrázky) a pri každom súbore ukáže, čo je zač — banku, obdobie, počet pohybov, účet — a či už bol importovaný. Súbory spozná podľa obsahu, takže ani premenovaná kópia sa nenaimportuje druhýkrát. Import sa spustí až tlačidlom GO; duplicitné pohyby sa preskočia.<br>PDF a obrázky číta lokálna Gemma (musí bežať Ollama) — trvá to dlho, preto nie sú zaškrtnuté automaticky.<br>Platby cez PayPal z banky a splátky karty sa nepočítajú do výdavkov dvakrát, keď sú v kategórii „Prevod medzi účtami“.',
   acc_name_ph:'Nový účet (napr. Visa kreditka)…', add_acc_btn:'Pridať účet',
   acc_hint:'Appka si pamätá, ktorý výpis patrí ku ktorému účtu.',
   acct_checking:'bežný', acct_savings:'sporiaci', acct_credit_card:'kreditná karta',
@@ -401,8 +401,8 @@ de: {
   add_btn:'Hinzufügen', save_valuation:'Bewertung speichern',
   del_asset_confirm:'Vermögenswert samt Bewertungshistorie löschen?', del_tx_confirm:'Umsatz löschen?',
   at_real_estate:'Immobilie', at_stocks:'Aktien', at_crypto:'Krypto', at_pension:'Altersvorsorge',
-  at_liability:'Verbindlichkeit (Kredit)', at_other:'Sonstiges',
-  import_info:'Die App sieht deinen Ordner mit Auszügen durch (CSV, XLS/XLSX, PDF, Bilder) und zeigt für jede Datei, was sie ist — Bank, Zeitraum, Anzahl der Umsätze, Konto — und ob sie schon importiert wurde. Dateien werden am Inhalt erkannt, auch eine umbenannte Kopie wird also nicht doppelt importiert. Der Import startet erst mit GO; doppelte Umsätze werden übersprungen.<br>PDFs und Bilder liest die lokale Gemma (Ollama muss laufen) — das dauert, daher sind sie nicht automatisch angehakt.<br>PayPal-Zahlungen vom Girokonto und Kartenausgleiche zählen nicht doppelt, wenn sie in der Kategorie „Umbuchung zwischen Konten“ stehen.',
+  at_liability:'Verbindlichkeit (Kredit)', at_other:'Sonstiges', at_etf:'ETF',
+  import_info:'Die App sieht deinen Ordner mit Auszügen durch (CSV, XLS/XLSX, CAMT XML/ZIP, PDF, Bilder) und zeigt für jede Datei, was sie ist — Bank, Zeitraum, Anzahl der Umsätze, Konto — und ob sie schon importiert wurde. Dateien werden am Inhalt erkannt, auch eine umbenannte Kopie wird also nicht doppelt importiert. Der Import startet erst mit GO; doppelte Umsätze werden übersprungen.<br>PDFs und Bilder liest die lokale Gemma (Ollama muss laufen) — das dauert, daher sind sie nicht automatisch angehakt.<br>PayPal-Zahlungen vom Girokonto und Kartenausgleiche zählen nicht doppelt, wenn sie in der Kategorie „Umbuchung zwischen Konten“ stehen.',
   acc_name_ph:'Neues Konto (z. B. Visa Kreditkarte)…', add_acc_btn:'Konto hinzufügen',
   acc_hint:'Die App merkt sich, welcher Auszug zu welchem Konto gehört.',
   acct_checking:'Girokonto', acct_savings:'Sparkonto', acct_credit_card:'Kreditkarte',
@@ -504,8 +504,8 @@ en: {
   add_btn:'Add', save_valuation:'Save valuation',
   del_asset_confirm:'Delete asset including valuation history?', del_tx_confirm:'Delete transaction?',
   at_real_estate:'Real estate', at_stocks:'Stocks', at_crypto:'Crypto', at_pension:'Pension savings',
-  at_liability:'Liability (loan)', at_other:'Other',
-  import_info:'The app looks through your statements folder (CSV, XLS/XLSX, PDF, images) and shows for every file what it is — bank, period, number of transactions, account — and whether it was imported already. Files are recognized by their content, so even a renamed copy is not imported twice. The import starts only when you press GO; duplicate transactions are skipped.<br>PDFs and images are read by the local Gemma (Ollama must be running) — that is slow, so they are not ticked automatically.<br>PayPal payments from the bank and card settlements are not counted twice when they are in the category "Transfer between accounts".',
+  at_liability:'Liability (loan)', at_other:'Other', at_etf:'ETF',
+  import_info:'The app looks through your statements folder (CSV, XLS/XLSX, CAMT XML/ZIP, PDF, images) and shows for every file what it is — bank, period, number of transactions, account — and whether it was imported already. Files are recognized by their content, so even a renamed copy is not imported twice. The import starts only when you press GO; duplicate transactions are skipped.<br>PDFs and images are read by the local Gemma (Ollama must be running) — that is slow, so they are not ticked automatically.<br>PayPal payments from the bank and card settlements are not counted twice when they are in the category "Transfer between accounts".',
   acc_name_ph:'New account (e.g. Visa credit card)…', add_acc_btn:'Add account',
   acc_hint:'The app remembers which statement belongs to which account.',
   acct_checking:'checking', acct_savings:'savings', acct_credit_card:'credit card',
