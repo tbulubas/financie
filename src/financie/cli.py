@@ -9,9 +9,6 @@ import argparse
 import sys
 from pathlib import Path
 
-SUPPORTED = {".csv", ".xlsx", ".xls", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
-
-
 def inspect(paths: list[str]) -> None:
     from financie import importer
 
@@ -22,7 +19,7 @@ def inspect(paths: list[str]) -> None:
     files: list[Path] = []
     for p in map(Path, paths):
         if p.is_dir():
-            files += sorted(f for f in p.iterdir() if f.suffix.lower() in SUPPORTED)
+            files += sorted(f for f in p.iterdir() if importer.file_kind(f.name))
         else:
             files.append(p)
     for f in files:

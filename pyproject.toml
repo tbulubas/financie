@@ -32,7 +32,7 @@ financie = "financie.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-financie = ["static/*"]
+financie = ["static/*", "static/vendor/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

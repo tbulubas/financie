@@ -10,8 +10,14 @@ import os
 
 import requests
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-MODEL = os.environ.get("GEMMA_MODEL", "gemma4:e4b")
+
+def _env(name: str, legacy: str, default: str) -> str:
+    # FINANCIE_* names; the unprefixed ones of earlier versions still work
+    return os.environ.get(name) or os.environ.get(legacy) or default
+
+
+OLLAMA_URL = _env("FINANCIE_OLLAMA_URL", "OLLAMA_URL", "http://localhost:11434")
+MODEL = _env("FINANCIE_GEMMA_MODEL", "GEMMA_MODEL", "gemma4:e4b")
 
 TX_SCHEMA = {
     "type": "object",

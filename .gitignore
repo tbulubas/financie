@@ -13,6 +13,12 @@ financie.db
 *.xlsx
 *.XLS
 *.XLSX
+# CAMT statements (XML, zipped); the IntelliJ run configurations stay
+*.xml
+*.XML
+!/.run/*.xml
+*.zip
+*.ZIP
 imports/
 data/
 exports/

@@ -25,8 +25,14 @@ def test_import_and_dedup(client, account_id):
     first = upload(client, account_id, data).json()
     assert first["inserted"] == 2 and first["skipped_duplicates"] == 0
 
-    again = upload(client, account_id, data).json()
-    assert again["inserted"] == 0 and again["skipped_duplicates"] == 2
+    # an overlapping statement: the known rows are skipped, the new one is added
+    longer = data + "03.05.2026;-5,00;Káva;Kaviareň\n".encode("utf-8")
+    again = upload(client, account_id, longer, "vypis-2.csv").json()
+    assert again["inserted"] == 1 and again["skipped_duplicates"] == 2
+
+    # the very same file again is refused as a whole
+    same = upload(client, account_id, data)
+    assert same.status_code == 400 and same.json()["detail"] == {"code": "already_imported", "info": "#1"}
 
 
 def test_learned_category_reused_on_next_import(client, account_id):
@@ -85,3 +91,13 @@ def test_net_worth_includes_liabilities(client):
     nw = client.get("/api/networth").json()
     assert nw["total_assets"] == 50000.0
     assert nw["net_worth"] == nw["total_accounts"] + 50000.0
+
+
+def test_transactions_by_year_and_the_years_list(client, account_id):
+    upload(client, account_id, csv_bytes("15.03.2021;-10,00;Nákup;Obchod A", "02.01.2025;-20,00;Nákup;Obchod B",
+                                         "20.12.2025;-30,00;Nákup;Obchod C", "05.11.2026;-40,00;Nákup;Obchod D"))
+    assert client.get("/api/transactions/years").json() == ["2026", "2025", "2021"]
+    year = client.get("/api/transactions", params={"year": "2025"}).json()
+    assert [t["date"] for t in year] == ["2025-12-20", "2025-01-02"]
+    month = client.get("/api/transactions", params={"month": "2025-12"}).json()
+    assert [t["amount"] for t in month] == [-30.0]

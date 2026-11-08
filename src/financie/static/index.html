@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Financie</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="/static/vendor/chart.umd.js"></script>
 <style>
   :root { --bg:#0f1420; --card:#1a2233; --text:#e8ecf4; --muted:#8b96ab; --accent:#4f8cff;
           --green:#3ecf8e; --red:#ff6b6b; --border:#2a3450; }
@@ -23,6 +23,18 @@
   .card .value { font-size:26px; font-weight:600; }
   .green { color:var(--green); } .red { color:var(--red); }
   .row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  /* overview panels: shown or hidden from the 📊 menu, collapsed by clicking their title */
+  #ovPanels[open] > div { right:0; }   /* near the right edge: open to the left */
+  .panels { display:flex; flex-wrap:wrap; gap:16px; align-items:flex-start; }   /* collapsed = title only */
+  .panels > .panel { flex:1 1 420px; min-width:0; }
+  .panels > .panel.wide { flex-basis:100%; }
+  .panel-head { cursor:pointer; user-select:none; display:flex; align-items:center; gap:8px; }
+  .panel-head::before { content:'▾'; color:var(--muted); font-size:13px; transition:transform .15s; }
+  .panel.collapsed .panel-head { margin-bottom:0; }
+  .panel.collapsed .panel-head::before { transform:rotate(-90deg); }
+  .panel.collapsed .panel-body { display:none; }
+  .bal-chart { position:relative; height:340px; }
+  .chart-box { position:relative; height:300px; }   /* the same height at half or full width */
   @media (max-width:800px){ .row { grid-template-columns:1fr; } }
   table { width:100%; border-collapse:collapse; font-size:14px; }
   th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); }
@@ -47,8 +59,21 @@
   .msg { padding:10px 14px; border-radius:8px; background:var(--card); border:1px solid var(--border); margin-bottom:14px; }
   .hint { color:var(--muted); font-size:13px; }
   .scroll-x { overflow-x:auto; }
-  #impTable td.file { max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #impTable td.file, #histTable td.file { max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #impTable select { max-width:220px; }
+  #impTable td.state, #histTable td.state { white-space:nowrap; }
+  #histTable a.warn { cursor:pointer; text-decoration:underline dotted; }
+  #histTable tr.dups > td { background:var(--bg); }
+  #histTable table.pairs td { padding:4px 8px; vertical-align:top; }
+  #histTable table.pairs td.side { max-width:340px; white-space:normal; }
+  .acc-pick { position:relative; }
+  .acc-pick summary { cursor:pointer; list-style:none; background:var(--bg); border:1px solid var(--border);
+                      border-radius:8px; padding:7px 10px; font-size:14px; }
+  .acc-pick[open] > div { position:absolute; z-index:10; margin-top:4px; min-width:220px; background:var(--card);
+                          border:1px solid var(--border); border-radius:8px; padding:8px 12px; }
+  .acc-pick label { display:block; padding:4px 0; white-space:nowrap; cursor:pointer; }
+  button.star { padding:4px 8px; }
+  .ok { color:var(--green); } .bad { color:var(--red); } .warn { color:#f5b94a; }
 </style>
 </head>
 <body>
@@ -83,22 +108,47 @@
     <button class="btn" onclick="shiftPeriod(-1)">◀</button>
     <input type="date" id="ovFrom"> – <input type="date" id="ovTo">
     <button class="btn" onclick="shiftPeriod(1)">▶</button>
+    <select id="ovAccPreset">
+      <option value="main" data-i18n="acc_main_view"></option>
+      <option value="satellite" data-i18n="acc_satellite_view"></option>
+      <option value="all" data-i18n="all_accounts"></option>
+      <option value="custom" data-i18n="acc_custom_view"></option>
+    </select>
+    <details class="acc-pick" id="ovAccPick"><summary id="ovAccSummary"></summary><div id="ovAccList"></div></details>
+    <details class="acc-pick" id="ovPanels"><summary>📊 <span data-i18n="panels_btn"></span></summary><div>
+      <label><input type="checkbox" value="summary" onchange="togglePanel(this)"> <span data-i18n="panel_summary"></span></label>
+      <label><input type="checkbox" value="categories" onchange="togglePanel(this)"> <span data-i18n="expenses_by_cat"></span></label>
+      <label><input type="checkbox" value="monthly" onchange="togglePanel(this)"> <span data-i18n="monthly_trend"></span></label>
+      <label><input type="checkbox" value="balances" onchange="togglePanel(this)"> <span data-i18n="balance_trend"></span></label>
+    </div></details>
+    <span class="hint" id="ovAccHint"></span>
+    <span class="warn" id="ovCoverage"></span>
   </div>
-  <div class="cards">
+  <div class="cards panel" data-panel="summary">
     <div class="card"><div class="label" data-i18n="income"></div><div class="value green" id="ovIncome">–</div></div>
     <div class="card"><div class="label" data-i18n="expenses"></div><div class="value red" id="ovExpense">–</div></div>
+    <div class="card hidden" id="ovTransfersCard"><div class="label" data-i18n="transfers_other"></div><div class="value" id="ovTransfers">–</div></div>
     <div class="card"><div class="label" data-i18n="month_balance"></div><div class="value" id="ovNet">–</div></div>
     <div class="card"><div class="label" data-i18n="net_worth"></div><div class="value" id="ovNW">–</div></div>
   </div>
-  <div class="row">
-    <div class="card"><h2 data-i18n="expenses_by_cat"></h2><canvas id="catChart"></canvas></div>
-    <div class="card"><h2 data-i18n="monthly_trend"></h2><canvas id="monthChart"></canvas></div>
+  <div class="panels">
+    <div class="card panel" data-panel="categories"><h2 class="panel-head" onclick="collapsePanel(this)"><span data-i18n="expenses_by_cat"></span></h2>
+      <div class="panel-body chart-box"><canvas id="catChart"></canvas></div></div>
+    <div class="card panel" data-panel="monthly"><h2 class="panel-head" onclick="collapsePanel(this)"><span data-i18n="monthly_trend"></span></h2>
+      <div class="panel-body chart-box"><canvas id="monthChart"></canvas></div></div>
+    <div class="card panel wide" data-panel="balances"><h2 class="panel-head" onclick="collapsePanel(this)"><span data-i18n="balance_trend"></span></h2>
+      <div class="panel-body"><div class="bal-chart"><canvas id="balChart"></canvas></div>
+        <div class="hint hidden" id="balEmpty" data-i18n="bal_empty"></div>
+        <div class="hint" id="balGaps"></div></div></div>
   </div>
 </section>
 
 <section id="tab-transactions" class="hidden">
   <div class="toolbar">
-    <input type="month" id="txMonth">
+    <button class="btn" onclick="shiftTxPeriod(-1)">◀</button>
+    <select id="txYear"></select>
+    <select id="txMonth"></select>
+    <button class="btn" onclick="shiftTxPeriod(1)">▶</button>
     <select id="txAccount"></select>
     <input type="search" id="txSearch" data-i18n-ph="search_ph">
     <label><input type="checkbox" id="txUncat"> <span data-i18n="only_uncat"></span></label>
@@ -110,7 +160,7 @@
       <col class="c-date"><col class="c-acct"><col><col class="c-cparty">
       <col class="c-cat"><col class="c-amt"><col class="c-del">
     </colgroup>
-    <thead><tr><th data-i18n="col_date"></th><th data-i18n="col_account"></th><th data-i18n="col_desc"></th><th data-i18n="col_cparty"></th><th data-i18n="col_cat"></th><th class="num" data-i18n="col_amount"></th><th></th></tr></thead>
+    <thead><tr><th data-i18n="col_date"></th><th data-i18n="col_account"></th><th data-i18n="col_desc"></th><th data-i18n="col_cparty"></th><th data-i18n="col_cat"></th><th class="num" id="txAmountHead" data-i18n="col_amount"></th><th></th></tr></thead>
     <tbody></tbody></table></div>
 </section>
 
@@ -161,16 +211,51 @@
   <div class="msg" data-i18n-html="import_info"></div>
   <div class="card">
     <div class="toolbar">
-      <input type="file" id="impFiles" multiple accept=".csv,.xlsx,.xls,.pdf,.png,.jpg,.jpeg,.webp">
-      <button class="btn primary" id="impAllBtn" onclick="importAll()" data-i18n="import_all_btn" disabled></button>
+      <span class="hint" data-i18n="imp_folder"></span>
+      <input id="impDir" style="flex:1;min-width:240px" data-i18n-ph="imp_folder_ph">
+      <button class="btn" onclick="saveDir()" data-i18n="imp_folder_save"></button>
+      <button class="btn" onclick="scanFolder()" data-i18n="imp_rescan"></button>
+    </div>
+    <div class="toolbar">
+      <span class="hint" data-i18n="imp_or_pick"></span>
+      <input type="file" id="impFiles" multiple accept=".csv,.xlsx,.xls,.xml,.zip,.pdf,.png,.jpg,.jpeg,.webp">
+    </div>
+    <div class="toolbar">
+      <select id="impKind">
+        <option value="" data-i18n="f_all_kinds"></option>
+        <option value="csv" data-i18n="kind_csv"></option>
+        <option value="excel" data-i18n="kind_excel"></option>
+        <option value="camt" data-i18n="kind_camt"></option>
+        <option value="pdf" data-i18n="kind_pdf"></option>
+        <option value="image" data-i18n="kind_image"></option>
+      </select>
+      <select id="impState">
+        <option value="" data-i18n="f_all_states"></option>
+        <option value="todo" data-i18n="f_todo"></option>
+        <option value="imported" data-i18n="f_imported"></option>
+        <option value="failed" data-i18n="f_failed"></option>
+      </select>
+      <button class="btn primary" id="impGoBtn" onclick="importAll()" disabled></button>
     </div>
     <div id="impResult" class="hint"></div>
     <div class="scroll-x"><table id="impTable" class="hidden" style="margin-top:8px">
-      <thead><tr><th></th><th data-i18n="col_file"></th><th data-i18n="col_format"></th><th data-i18n="col_period"></th>
-        <th class="num" data-i18n="col_rows"></th><th data-i18n="col_account"></th><th data-i18n="col_status"></th></tr></thead>
+      <thead><tr><th><input type="checkbox" id="impChkAll" onchange="checkAll(this.checked)"></th>
+        <th data-i18n="col_file"></th><th data-i18n="col_type"></th><th data-i18n="col_format"></th>
+        <th data-i18n="col_period"></th><th class="num" data-i18n="col_rows"></th><th data-i18n="col_status"></th>
+        <th data-i18n="col_account"></th><th data-i18n="col_result"></th></tr></thead>
       <tbody></tbody>
     </table></div>
-    <div class="toolbar" style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h2 data-i18n="history_title"></h2>
+    <div class="scroll-x"><table id="histTable">
+      <thead><tr><th></th><th>#</th><th data-i18n="col_time"></th><th data-i18n="col_file"></th><th data-i18n="col_format"></th>
+        <th data-i18n="col_account"></th><th data-i18n="col_period"></th><th data-i18n="col_result"></th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="toolbar">
       <input id="newAccName" data-i18n-ph="acc_name_ph">
       <select id="newAccType">
         <option value="checking" data-i18n="acct_checking"></option>
@@ -184,7 +269,8 @@
       <span class="hint" data-i18n="acc_hint"></span>
     </div>
     <table id="accTable" style="margin-top:8px">
-      <thead><tr><th data-i18n="col_name"></th><th data-i18n="col_type"></th><th class="num" data-i18n="col_balance"></th><th></th></tr></thead>
+      <thead><tr><th></th><th data-i18n="col_name"></th><th data-i18n="col_type"></th><th data-i18n="col_coverage"></th>
+        <th class="num" data-i18n="col_balance"></th><th></th><th></th><th></th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -196,14 +282,14 @@ const I18N = {
 sk: {
   app_title:'Financie', nav_overview:'Prehľad', nav_transactions:'Transakcie', nav_budget:'Rozpočet',
   nav_assets:'Majetok', nav_import:'Import',
-  income:'Príjmy', expenses:'Výdavky', month_balance:'Bilancia mesiaca', net_worth:'Čisté imanie',
+  income:'Príjmy', expenses:'Výdavky', month_balance:'Bilancia obdobia', net_worth:'Čisté imanie',
   expenses_by_cat:'Výdavky podľa kategórií', monthly_trend:'Vývoj po mesiacoch',
   p_this_month:'Tento mesiac', p_last_month:'Minulý mesiac', p_this_year:'Tento rok',
   p_last_year:'Minulý rok', p_all:'Všetko', p_custom:'Vlastné obdobie',
   search_ph:'Hľadať…', only_uncat:'len nezaradené', recat_btn:'Dokategorizovať',
   recat_working:'Gemma pracuje… (max 200 naraz, priebeh v termináli)',
   recat_done:(n,r)=>`Zaradených ${n}, zostáva nezaradených ${r}.`,
-  col_date:'Dátum', col_account:'Účet', all_accounts:'Všetky účty', col_desc:'Popis', col_cparty:'Protistrana', col_cat:'Kategória', col_amount:'Suma',
+  col_date:'Dátum', col_account:'Účet', all_accounts:'Všetky účty', all_years:'Všetky roky', whole_year:'Celý rok', col_desc:'Popis', col_cparty:'Protistrana', col_cat:'Kategória', col_amount:'Suma',
   col_limit:'Limit €', col_spent:'Minuté', col_progress:'Plnenie', col_name:'Názov', col_type:'Typ', col_value:'Hodnota',
   budget_hint:'Limit uložíš klávesom Enter. Platí pre každý mesiac.',
   new_cat_ph:'Nová kategória…', kind_expense:'výdavok', kind_income:'príjem', add_cat_btn:'Pridať kategóriu',
@@ -214,7 +300,7 @@ sk: {
   del_asset_confirm:'Vymazať aktívum aj s históriou ocenení?', del_tx_confirm:'Vymazať transakciu?',
   at_real_estate:'Nehnuteľnosť', at_stocks:'Akcie', at_crypto:'Krypto', at_pension:'Dôchodkové sporenie',
   at_liability:'Záväzok (úver)', at_other:'Iné',
-  import_info:'Vyber naraz všetky stiahnuté výpisy (CSV, XLS/XLSX, PDF, obrázky). Appka zistí, čo je čo — banku, obdobie, počet pohybov — a ku ktorému účtu patria; pri novom zdroji navrhne nový účet. Duplicity sa preskočia, takže prekrývajúce sa výpisy nevadia.<br>PDF a obrázky číta lokálna Gemma (musí bežať Ollama) — trvá to dlho, preto nie sú zaškrtnuté automaticky.<br>Platby cez PayPal z banky a splátky karty sa nepočítajú do výdavkov dvakrát, keď sú v kategórii „Prevod medzi účtami“.',
+  import_info:'Appka prezrie tvoj priečinok s výpismi (CSV, XLS/XLSX, PDF, obrázky) a pri každom súbore ukáže, čo je zač — banku, obdobie, počet pohybov, účet — a či už bol importovaný. Súbory spozná podľa obsahu, takže ani premenovaná kópia sa nenaimportuje druhýkrát. Import sa spustí až tlačidlom GO; duplicitné pohyby sa preskočia.<br>PDF a obrázky číta lokálna Gemma (musí bežať Ollama) — trvá to dlho, preto nie sú zaškrtnuté automaticky.<br>Platby cez PayPal z banky a splátky karty sa nepočítajú do výdavkov dvakrát, keď sú v kategórii „Prevod medzi účtami“.',
   acc_name_ph:'Nový účet (napr. Visa kreditka)…', add_acc_btn:'Pridať účet',
   acc_hint:'Appka si pamätá, ktorý výpis patrí ku ktorému účtu.',
   acct_checking:'bežný', acct_savings:'sporiaci', acct_credit_card:'kreditná karta',
@@ -224,7 +310,6 @@ sk: {
   error:'Chyba', gemma_ready:m=>`● Gemma pripravená (${m})`, gemma_off:'○ Ollama nebeží',
   err_ollama_missing:'Ollama nebeží — spusti ju, alebo importuj CSV/XLSX.',
   err_parse_failed:'Súbor sa nepodarilo spracovať', err_no_transactions:'V súbore sa nenašli žiadne transakcie.',
-  import_all_btn:'Importovať označené',
   col_file:'Súbor',
   col_format:'Formát',
   col_period:'Obdobie',
@@ -232,12 +317,60 @@ sk: {
   col_status:'Stav',
   choose_account:'— vyber účet —',
   new_account_opt:n=>`➕ nový účet: ${n}`,
+  new_account_ask:'➕ iný nový účet…', new_account_prompt:'Názov nového účtu (napr. PayPal):',
   fmt_gemma:'Gemma (pomalé)',
   analyzing:'Zisťujem, čo je čo…',
   imp_empty:'prázdny súbor',
+  panels_btn:'Grafy', panel_summary:'Súhrn (príjmy, výdavky, majetok)',
+  balance_trend:'Vývoj zostatkov',
+  bal_gap:(a, f, to)=>`↔ ${a}: chýbajú dáta ${f} – ${to}, zostatky pred medzerou podľa banky`, bal_total:'Spolu', bal_checks:'Kontroly zostatku',
+  bal_empty:'Pre zvolené účty a obdobie nie sú žiadne dáta.',
+  bal_check_ok:(a, v)=>`✓ ${a}: banka ${v}, sedí`, bal_check_off:(a, v, d)=>`⚠ ${a}: banka ${v}, rozdiel appky ${d}`,
+  imp_no_amount:n=>`⚠ ${n} riadkov bez sumy vo výpise (vynechané, chýbajú v appke)`,
   imp_need_account:'vyber účet',
   imp_running:'importujem…',
-  imp_row_done:r=>[`✓ ${r.inserted} nových`, r.skipped_duplicates && `${r.skipped_duplicates} už bolo`, r.linked_transfers && `🔗 ${r.linked_transfers} PayPal prevodov`, r.possible_duplicates && `⚠ ${r.possible_duplicates} možných duplicít`].filter(Boolean).join(' · '),
+  imp_balance:b=>[b.known && `⚖ zostatok ${fmt(b.amount)} k ${b.date} prevzatý z výpisu`, b.off ? `⚠ zostatok nesedí v ${b.off} z ${b.days} dní (prvý ${b.first_off}: rozdiel ${fmt(b.first_difference)})` : b.days > 1 ? `✓ zostatok sedí vo všetkých ${b.days} dňoch` : b.days ? `✓ zostatok k ${b.date} sedí` : '', ...(b.gaps || []).map(g => `↔ medzera v dátach ${g.from} – ${g.to}: zostatky pred ňou podľa banky`)].filter(Boolean).join(' · '),
+  imp_row_done:r=>[`✓ ${r.inserted} nových`, r.skipped_duplicates && `${r.skipped_duplicates} už bolo`, r.linked_transfers && `🔗 ${r.linked_transfers} PayPal prevodov`, r.possible_duplicates && `⚠ ${r.possible_duplicates} možných duplicít`, r.voided && `✕ ${r.voided} zrušených (platba neprešla)`, r.no_amount && t('imp_no_amount')(r.no_amount), r.balance && t('imp_balance')(r.balance)].filter(Boolean).join(' · '),
+  imp_folder:'Priečinok s výpismi:', imp_folder_ph:'napr. C:\\Users\\…\\Vypisy', imp_folder_save:'Uložiť',
+  imp_rescan:'↻ Načítať znova', imp_or_pick:'alebo vyber súbory ručne:',
+  imp_no_folder:'Nastav priečinok s výpismi — appka ho pri otvorení tejto záložky prezrie sama. Importuje sa až po stlačení GO.',
+  imp_folder_files:(n, dir)=>`${n} súborov v ${dir}. Nič sa neimportuje, kým nestlačíš GO.`,
+  imp_scanning:'Prezerám priečinok…',
+  f_all_kinds:'Všetky typy', kind_csv:'CSV', kind_excel:'Excel', kind_camt:'CAMT (XML)', kind_pdf:'PDF', kind_image:'Obrázky',
+  f_all_states:'Všetky stavy', f_todo:'Na import (nové a zmenené)', f_imported:'Importované', f_failed:'S chybou',
+  go_btn:n=>`▶ GO — importovať ${n}`,
+  go_confirm:n=>`Spustiť import ${n} ${n===1?'súboru':'súborov'}?`,
+  st_new:'🆕 nový', st_changed:'✎ zmenený', st_imported:d=>`✓ importovaný ${d}`, st_failed:'✕ chyba',
+  st_changed_title:'Súbor s týmto názvom už bol importovaný, ale jeho obsah je iný.',
+  col_result:'Výsledok', col_time:'Čas', history_title:'História importov', hist_empty:'Zatiaľ žiadne importy.',
+  err_folder_missing:'Priečinok neexistuje', err_file_missing:'Súbor už v priečinku nie je',
+  dup_hint:'Ten istý pohyb dvakrát → zmaž jeden (✕). Dobitie PayPal alebo splátka karty → označ stranu z banky ako prevod. Dva rôzne pohyby → nechaj tak.',
+  dup_this:'tento import', dup_transfer_btn:'→ prevod',
+  dup_transfer_title:'Označiť ako prevod medzi účtami (dobitie PayPal, splátka karty)',
+  dup_delete_title:'Zmazať túto transakciu (skutočná duplicita)',
+  dup_delete_confirm:(d, a)=>`Zmazať transakciu ${d} ${a}?`,
+  hist_dups:(n, of)=>`⚠ ${n} možných duplicít (už v ${of})`, hist_older:'staršom importe', hist_undone:'↶ vrátený',
+  undo_btn:'Vrátiť import', undo_confirm:(n, f)=>`Vrátiť import „${f}“? Zmažú sa všetky transakcie, ktoré priniesol (${n}), aj s ich kategóriami.`,
+  undo_done:n=>`Zmazané transakcie: ${n}.`,
+  err_already_imported:'Tento súbor už bol do tohto účtu importovaný — import',
+  acc_main_view:'Hlavný účet', acc_satellite_view:'Satelitné účty', acc_custom_view:'Vlastný výber',
+  acc_selected:(n, m)=>`Účty: ${n} z ${m}`,
+  col_coverage:'Dáta', bal_known:d=>`známy k ${d}`, bal_unknown:'bez známeho zostatku',
+  bal_set_title:'Zadať skutočný zostatok k dátumu (z internet bankingu alebo výpisu)',
+  bal_prompt_amount:n=>`Skutočný zostatok účtu „${n}“ na konci dňa (napr. 1.234,56; prázdne = zrušiť):`,
+  bal_prompt_date:'K dátumu (RRRR-MM-DD alebo DD.MM.RRRR):', bal_bad_amount:'Neplatná suma.',
+  err_invalid_date:'Neplatný dátum',
+  err_name_required:'Zadaj názov účtu', err_name_taken:'Účet s týmto názvom už existuje',
+  cov_late:l=>`⚠ Na začiatku obdobia chýbajú dáta: ${l}`, cov_from:(n, d)=>`${n} až od ${d}`, cov_none:n=>`${n} žiadne`,
+  check_title:'Kontrola: zadať skutočný zostatok z banky a porovnať ho s appkou',
+  check_prompt:n=>`Kontrola „${n}“: zostatok v banke na konci dňa (Kontostand, nie disponibilný):`,
+  check_ok:c=>`✓ Sedí: ${fmt(c.amount)} k ${c.date}.`,
+  check_diff:c=>`⚠ Nesedí k ${c.date}: banka ${fmt(c.amount)}, appka ${fmt(c.expected)}, rozdiel ${fmt(c.difference)}.\nV Transakciách vyfiltruj tento účet a porovnaj zostatok po pohyboch s bankou, nájdeš deň, kde sa to rozchádza.`,
+  check_ok_short:d=>`✓ sedí s bankou k ${d}`, check_diff_short:(x, d)=>`⚠ rozdiel ${x} k ${d}`,
+  check_line:c=>`${c.date}: banka ${fmt(c.amount)}, appka ${fmt(c.expected)}${c.difference ? ', rozdiel '+fmt(c.difference) : ' ✓'}`,
+  col_amount_running:'Suma / zostatok', running_title:'Zostatok po tomto pohybe (na konci dňa sa musí zhodovať s bankou)',
+  acc_no_main:'Žiadny účet nie je označený ako hlavný, ukazujem všetky. Označ ho ⭐ v záložke Import.',
+  transfers_other:'Prevody do/z ostatných účtov', main_toggle:'Hlavný účet (výplaty)',
   err_empty_name:'Názov nesmie byť prázdny.', err_duplicate_category:'Kategória s týmto názvom už existuje.',
   cat_groceries:'Potraviny', cat_housing:'Bývanie', cat_energy:'Energie', cat_transport:'Doprava',
   cat_car:'Auto', cat_restaurants:'Reštaurácie', cat_health:'Zdravie', cat_clothing:'Oblečenie',
@@ -251,14 +384,14 @@ sk: {
 de: {
   app_title:'Finanzen', nav_overview:'Übersicht', nav_transactions:'Umsätze', nav_budget:'Budget',
   nav_assets:'Vermögen', nav_import:'Import',
-  income:'Einnahmen', expenses:'Ausgaben', month_balance:'Monatsbilanz', net_worth:'Nettovermögen',
+  income:'Einnahmen', expenses:'Ausgaben', month_balance:'Saldo des Zeitraums', net_worth:'Nettovermögen',
   expenses_by_cat:'Ausgaben nach Kategorien', monthly_trend:'Monatsverlauf',
   p_this_month:'Dieser Monat', p_last_month:'Letzter Monat', p_this_year:'Dieses Jahr',
   p_last_year:'Letztes Jahr', p_all:'Alles', p_custom:'Eigener Zeitraum',
   search_ph:'Suchen…', only_uncat:'nur ohne Kategorie', recat_btn:'Nachkategorisieren',
   recat_working:'Gemma arbeitet… (max. 200 auf einmal, Fortschritt im Terminal)',
   recat_done:(n,r)=>`${n} zugeordnet, ${r} verbleiben ohne Kategorie.`,
-  col_date:'Datum', col_account:'Konto', all_accounts:'Alle Konten', col_desc:'Verwendungszweck', col_cparty:'Beteiligter', col_cat:'Kategorie', col_amount:'Betrag',
+  col_date:'Datum', col_account:'Konto', all_accounts:'Alle Konten', all_years:'Alle Jahre', whole_year:'Ganzes Jahr', col_desc:'Verwendungszweck', col_cparty:'Beteiligter', col_cat:'Kategorie', col_amount:'Betrag',
   col_limit:'Limit €', col_spent:'Ausgegeben', col_progress:'Auslastung', col_name:'Name', col_type:'Typ', col_value:'Wert',
   budget_hint:'Limit mit Enter speichern. Gilt für jeden Monat.',
   new_cat_ph:'Neue Kategorie…', kind_expense:'Ausgabe', kind_income:'Einnahme', add_cat_btn:'Kategorie hinzufügen',
@@ -269,7 +402,7 @@ de: {
   del_asset_confirm:'Vermögenswert samt Bewertungshistorie löschen?', del_tx_confirm:'Umsatz löschen?',
   at_real_estate:'Immobilie', at_stocks:'Aktien', at_crypto:'Krypto', at_pension:'Altersvorsorge',
   at_liability:'Verbindlichkeit (Kredit)', at_other:'Sonstiges',
-  import_info:'Wähle alle heruntergeladenen Auszüge auf einmal (CSV, XLS/XLSX, PDF, Bilder). Die App erkennt Bank, Zeitraum, Anzahl der Umsätze und das passende Konto; für eine neue Quelle schlägt sie ein neues Konto vor. Duplikate werden übersprungen, überlappende Auszüge sind also kein Problem.<br>PDFs und Bilder liest die lokale Gemma (Ollama muss laufen) — das dauert, daher sind sie nicht automatisch angehakt.<br>PayPal-Zahlungen vom Girokonto und Kartenausgleiche zählen nicht doppelt, wenn sie in der Kategorie „Umbuchung zwischen Konten“ stehen.',
+  import_info:'Die App sieht deinen Ordner mit Auszügen durch (CSV, XLS/XLSX, PDF, Bilder) und zeigt für jede Datei, was sie ist — Bank, Zeitraum, Anzahl der Umsätze, Konto — und ob sie schon importiert wurde. Dateien werden am Inhalt erkannt, auch eine umbenannte Kopie wird also nicht doppelt importiert. Der Import startet erst mit GO; doppelte Umsätze werden übersprungen.<br>PDFs und Bilder liest die lokale Gemma (Ollama muss laufen) — das dauert, daher sind sie nicht automatisch angehakt.<br>PayPal-Zahlungen vom Girokonto und Kartenausgleiche zählen nicht doppelt, wenn sie in der Kategorie „Umbuchung zwischen Konten“ stehen.',
   acc_name_ph:'Neues Konto (z. B. Visa Kreditkarte)…', add_acc_btn:'Konto hinzufügen',
   acc_hint:'Die App merkt sich, welcher Auszug zu welchem Konto gehört.',
   acct_checking:'Girokonto', acct_savings:'Sparkonto', acct_credit_card:'Kreditkarte',
@@ -279,7 +412,6 @@ de: {
   error:'Fehler', gemma_ready:m=>`● Gemma bereit (${m})`, gemma_off:'○ Ollama läuft nicht',
   err_ollama_missing:'Ollama läuft nicht — starte sie oder importiere CSV/XLSX.',
   err_parse_failed:'Datei konnte nicht verarbeitet werden', err_no_transactions:'Keine Umsätze in der Datei gefunden.',
-  import_all_btn:'Markierte importieren',
   col_file:'Datei',
   col_format:'Format',
   col_period:'Zeitraum',
@@ -287,12 +419,60 @@ de: {
   col_status:'Status',
   choose_account:'— Konto wählen —',
   new_account_opt:n=>`➕ neues Konto: ${n}`,
+  new_account_ask:'➕ anderes neues Konto…', new_account_prompt:'Name des neuen Kontos (z. B. PayPal):',
   fmt_gemma:'Gemma (langsam)',
   analyzing:'Erkenne die Dateien…',
   imp_empty:'leere Datei',
+  panels_btn:'Diagramme', panel_summary:'Übersicht (Einnahmen, Ausgaben, Vermögen)',
+  balance_trend:'Saldenverlauf',
+  bal_gap:(a, f, to)=>`↔ ${a}: keine Daten ${f} – ${to}, Salden vor der Lücke laut Bank`, bal_total:'Gesamt', bal_checks:'Saldoprüfungen',
+  bal_empty:'Für die gewählten Konten und den Zeitraum gibt es keine Daten.',
+  bal_check_ok:(a, v)=>`✓ ${a}: Bank ${v}, stimmt`, bal_check_off:(a, v, d)=>`⚠ ${a}: Bank ${v}, Differenz der App ${d}`,
+  imp_no_amount:n=>`⚠ ${n} Zeilen ohne Betrag im Auszug (ausgelassen, fehlen in der App)`,
   imp_need_account:'Konto wählen',
   imp_running:'importiere…',
-  imp_row_done:r=>[`✓ ${r.inserted} neu`, r.skipped_duplicates && `${r.skipped_duplicates} schon vorhanden`, r.linked_transfers && `🔗 ${r.linked_transfers} PayPal-Umbuchungen`, r.possible_duplicates && `⚠ ${r.possible_duplicates} mögliche Duplikate`].filter(Boolean).join(' · '),
+  imp_balance:b=>[b.known && `⚖ Saldo ${fmt(b.amount)} zum ${b.date} aus dem Auszug übernommen`, b.off ? `⚠ Saldo stimmt an ${b.off} von ${b.days} Tagen nicht (zuerst ${b.first_off}: Differenz ${fmt(b.first_difference)})` : b.days > 1 ? `✓ Saldo stimmt an allen ${b.days} Tagen` : b.days ? `✓ Saldo zum ${b.date} stimmt` : '', ...(b.gaps || []).map(g => `↔ Datenlücke ${g.from} – ${g.to}: Salden davor laut Bank`)].filter(Boolean).join(' · '),
+  imp_row_done:r=>[`✓ ${r.inserted} neu`, r.skipped_duplicates && `${r.skipped_duplicates} schon vorhanden`, r.linked_transfers && `🔗 ${r.linked_transfers} PayPal-Umbuchungen`, r.possible_duplicates && `⚠ ${r.possible_duplicates} mögliche Duplikate`, r.voided && `✕ ${r.voided} storniert (Zahlung fehlgeschlagen)`, r.no_amount && t('imp_no_amount')(r.no_amount), r.balance && t('imp_balance')(r.balance)].filter(Boolean).join(' · '),
+  imp_folder:'Ordner mit Auszügen:', imp_folder_ph:'z. B. C:\\Users\\…\\Auszuege', imp_folder_save:'Speichern',
+  imp_rescan:'↻ Neu einlesen', imp_or_pick:'oder Dateien selbst wählen:',
+  imp_no_folder:'Lege den Ordner mit den Auszügen fest — die App sieht ihn beim Öffnen dieses Tabs selbst durch. Importiert wird erst nach GO.',
+  imp_folder_files:(n, dir)=>`${n} Dateien in ${dir}. Nichts wird importiert, bevor du GO drückst.`,
+  imp_scanning:'Ordner wird durchgesehen…',
+  f_all_kinds:'Alle Typen', kind_csv:'CSV', kind_excel:'Excel', kind_camt:'CAMT (XML)', kind_pdf:'PDF', kind_image:'Bilder',
+  f_all_states:'Alle Status', f_todo:'Zu importieren (neu und geändert)', f_imported:'Importiert', f_failed:'Mit Fehler',
+  go_btn:n=>`▶ GO — ${n} importieren`,
+  go_confirm:n=>`${n} ${n===1?'Datei':'Dateien'} jetzt importieren?`,
+  st_new:'🆕 neu', st_changed:'✎ geändert', st_imported:d=>`✓ importiert ${d}`, st_failed:'✕ Fehler',
+  st_changed_title:'Eine Datei mit diesem Namen wurde schon importiert, ihr Inhalt ist aber anders.',
+  col_result:'Ergebnis', col_time:'Zeit', history_title:'Importverlauf', hist_empty:'Noch keine Importe.',
+  err_folder_missing:'Ordner existiert nicht', err_file_missing:'Datei ist nicht mehr im Ordner',
+  dup_hint:'Dieselbe Bewegung doppelt → eine löschen (✕). Aufladung von PayPal oder Kartenabrechnung → die Bankseite als Umbuchung markieren. Zwei verschiedene Bewegungen → so lassen.',
+  dup_this:'dieser Import', dup_transfer_btn:'→ Umbuchung',
+  dup_transfer_title:'Als Umbuchung zwischen Konten markieren (PayPal-Aufladung, Kartenabrechnung)',
+  dup_delete_title:'Diese Buchung löschen (echtes Duplikat)',
+  dup_delete_confirm:(d, a)=>`Buchung ${d} ${a} löschen?`,
+  hist_dups:(n, of)=>`⚠ ${n} mögliche Duplikate (schon in ${of})`, hist_older:'älterem Import', hist_undone:'↶ rückgängig gemacht',
+  undo_btn:'Import rückgängig machen', undo_confirm:(n, f)=>`Import „${f}“ rückgängig machen? Die ${n} Umsätze daraus werden samt Kategorien gelöscht.`,
+  undo_done:n=>`${n} Umsätze gelöscht.`,
+  err_already_imported:'Diese Datei wurde in dieses Konto schon importiert — Import',
+  acc_main_view:'Hauptkonto', acc_satellite_view:'Nebenkonten', acc_custom_view:'Eigene Auswahl',
+  acc_selected:(n, m)=>`Konten: ${n} von ${m}`,
+  col_coverage:'Daten', bal_known:d=>`bekannt zum ${d}`, bal_unknown:'kein bekannter Saldo',
+  bal_set_title:'Tatsächlichen Saldo zu einem Datum eingeben (aus dem Online-Banking oder einem Auszug)',
+  bal_prompt_amount:n=>`Tatsächlicher Saldo von „${n}“ am Ende des Tages (z. B. 1.234,56; leer = entfernen):`,
+  bal_prompt_date:'Zum Datum (JJJJ-MM-TT oder TT.MM.JJJJ):', bal_bad_amount:'Ungültiger Betrag.',
+  err_invalid_date:'Ungültiges Datum',
+  err_name_required:'Gib einen Kontonamen ein', err_name_taken:'Ein Konto mit diesem Namen gibt es schon',
+  cov_late:l=>`⚠ Am Anfang des Zeitraums fehlen Daten: ${l}`, cov_from:(n, d)=>`${n} erst ab ${d}`, cov_none:n=>`${n} keine`,
+  check_title:'Kontrolle: tatsächlichen Saldo der Bank eingeben und mit der App vergleichen',
+  check_prompt:n=>`Kontrolle „${n}“: Saldo bei der Bank am Ende des Tages (Kontostand, nicht verfügbar):`,
+  check_ok:c=>`✓ Stimmt: ${fmt(c.amount)} zum ${c.date}.`,
+  check_diff:c=>`⚠ Stimmt nicht zum ${c.date}: Bank ${fmt(c.amount)}, App ${fmt(c.expected)}, Differenz ${fmt(c.difference)}.\nFiltere unter Transaktionen dieses Konto und vergleiche den Saldo nach jeder Buchung mit der Bank, um den Tag zu finden.`,
+  check_ok_short:d=>`✓ stimmt mit der Bank zum ${d}`, check_diff_short:(x, d)=>`⚠ Differenz ${x} zum ${d}`,
+  check_line:c=>`${c.date}: Bank ${fmt(c.amount)}, App ${fmt(c.expected)}${c.difference ? ', Differenz '+fmt(c.difference) : ' ✓'}`,
+  col_amount_running:'Betrag / Saldo', running_title:'Saldo nach dieser Buchung (am Ende des Tages muss er mit der Bank übereinstimmen)',
+  acc_no_main:'Kein Konto ist als Hauptkonto markiert, alle werden gezeigt. Markiere es mit ⭐ im Tab Import.',
+  transfers_other:'Umbuchungen von/zu anderen Konten', main_toggle:'Hauptkonto (Gehälter)',
   err_empty_name:'Name darf nicht leer sein.', err_duplicate_category:'Kategorie mit diesem Namen existiert bereits.',
   cat_groceries:'Lebensmittel', cat_housing:'Wohnen', cat_energy:'Energie',
   cat_transport:'Verkehr', cat_car:'Auto', cat_restaurants:'Restaurants', cat_health:'Gesundheit',
@@ -307,14 +487,14 @@ de: {
 en: {
   app_title:'Finances', nav_overview:'Overview', nav_transactions:'Transactions', nav_budget:'Budget',
   nav_assets:'Assets', nav_import:'Import',
-  income:'Income', expenses:'Expenses', month_balance:'Month balance', net_worth:'Net worth',
+  income:'Income', expenses:'Expenses', month_balance:'Balance of the period', net_worth:'Net worth',
   expenses_by_cat:'Expenses by category', monthly_trend:'Monthly trend',
   p_this_month:'This month', p_last_month:'Last month', p_this_year:'This year',
   p_last_year:'Last year', p_all:'All time', p_custom:'Custom range',
   search_ph:'Search…', only_uncat:'uncategorized only', recat_btn:'Recategorize',
   recat_working:'Gemma is working… (max 200 at once, progress in terminal)',
   recat_done:(n,r)=>`${n} categorized, ${r} remaining uncategorized.`,
-  col_date:'Date', col_account:'Account', all_accounts:'All accounts', col_desc:'Description', col_cparty:'Counterparty', col_cat:'Category', col_amount:'Amount',
+  col_date:'Date', col_account:'Account', all_accounts:'All accounts', all_years:'All years', whole_year:'Whole year', col_desc:'Description', col_cparty:'Counterparty', col_cat:'Category', col_amount:'Amount',
   col_limit:'Limit €', col_spent:'Spent', col_progress:'Progress', col_name:'Name', col_type:'Type', col_value:'Value',
   budget_hint:'Press Enter to save a limit. Applies to every month.',
   new_cat_ph:'New category…', kind_expense:'expense', kind_income:'income', add_cat_btn:'Add category',
@@ -325,7 +505,7 @@ en: {
   del_asset_confirm:'Delete asset including valuation history?', del_tx_confirm:'Delete transaction?',
   at_real_estate:'Real estate', at_stocks:'Stocks', at_crypto:'Crypto', at_pension:'Pension savings',
   at_liability:'Liability (loan)', at_other:'Other',
-  import_info:'Select all downloaded statements at once (CSV, XLS/XLSX, PDF, images). The app works out what each one is — bank, period, number of transactions — and which account it belongs to; for a new source it proposes a new account. Duplicates are skipped, so overlapping statements are fine.<br>PDFs and images are read by the local Gemma (Ollama must be running) — that is slow, so they are not ticked automatically.<br>PayPal payments from the bank and card settlements are not counted twice when they are in the category "Transfer between accounts".',
+  import_info:'The app looks through your statements folder (CSV, XLS/XLSX, PDF, images) and shows for every file what it is — bank, period, number of transactions, account — and whether it was imported already. Files are recognized by their content, so even a renamed copy is not imported twice. The import starts only when you press GO; duplicate transactions are skipped.<br>PDFs and images are read by the local Gemma (Ollama must be running) — that is slow, so they are not ticked automatically.<br>PayPal payments from the bank and card settlements are not counted twice when they are in the category "Transfer between accounts".',
   acc_name_ph:'New account (e.g. Visa credit card)…', add_acc_btn:'Add account',
   acc_hint:'The app remembers which statement belongs to which account.',
   acct_checking:'checking', acct_savings:'savings', acct_credit_card:'credit card',
@@ -335,7 +515,6 @@ en: {
   error:'Error', gemma_ready:m=>`● Gemma ready (${m})`, gemma_off:'○ Ollama not running',
   err_ollama_missing:'Ollama is not running — start it, or import CSV/XLSX.',
   err_parse_failed:'Could not process file', err_no_transactions:'No transactions found in the file.',
-  import_all_btn:'Import selected',
   col_file:'File',
   col_format:'Format',
   col_period:'Period',
@@ -343,12 +522,60 @@ en: {
   col_status:'Status',
   choose_account:'— choose account —',
   new_account_opt:n=>`➕ new account: ${n}`,
+  new_account_ask:'➕ other new account…', new_account_prompt:'Name of the new account (e.g. PayPal):',
   fmt_gemma:'Gemma (slow)',
   analyzing:'Working out what is what…',
   imp_empty:'empty file',
+  panels_btn:'Charts', panel_summary:'Summary (income, expenses, net worth)',
+  balance_trend:'Balance over time',
+  bal_gap:(a, f, to)=>`↔ ${a}: no data ${f} – ${to}, balances before the gap follow the bank`, bal_total:'Total', bal_checks:'Balance checks',
+  bal_empty:'No data for the chosen accounts and period.',
+  bal_check_ok:(a, v)=>`✓ ${a}: bank ${v}, matches`, bal_check_off:(a, v, d)=>`⚠ ${a}: bank ${v}, the app is off by ${d}`,
+  imp_no_amount:n=>`⚠ ${n} rows without an amount in the statement (left out, missing in the app)`,
   imp_need_account:'choose an account',
   imp_running:'importing…',
-  imp_row_done:r=>[`✓ ${r.inserted} new`, r.skipped_duplicates && `${r.skipped_duplicates} already there`, r.linked_transfers && `🔗 ${r.linked_transfers} PayPal transfers`, r.possible_duplicates && `⚠ ${r.possible_duplicates} possible duplicates`].filter(Boolean).join(' · '),
+  imp_balance:b=>[b.known && `⚖ balance ${fmt(b.amount)} on ${b.date} taken from the statement`, b.off ? `⚠ balance off on ${b.off} of ${b.days} days (first ${b.first_off}: by ${fmt(b.first_difference)})` : b.days > 1 ? `✓ balance matches on all ${b.days} days` : b.days ? `✓ balance on ${b.date} matches` : '', ...(b.gaps || []).map(g => `↔ gap in the data ${g.from} – ${g.to}: balances before it follow the bank`)].filter(Boolean).join(' · '),
+  imp_row_done:r=>[`✓ ${r.inserted} new`, r.skipped_duplicates && `${r.skipped_duplicates} already there`, r.linked_transfers && `🔗 ${r.linked_transfers} PayPal transfers`, r.possible_duplicates && `⚠ ${r.possible_duplicates} possible duplicates`, r.voided && `✕ ${r.voided} voided (payment failed)`, r.no_amount && t('imp_no_amount')(r.no_amount), r.balance && t('imp_balance')(r.balance)].filter(Boolean).join(' · '),
+  imp_folder:'Statements folder:', imp_folder_ph:'e.g. C:\\Users\\…\\Statements', imp_folder_save:'Save',
+  imp_rescan:'↻ Rescan', imp_or_pick:'or pick files yourself:',
+  imp_no_folder:'Set the folder with your statements — the app looks through it whenever this tab opens. Nothing is imported until you press GO.',
+  imp_folder_files:(n, dir)=>`${n} files in ${dir}. Nothing is imported until you press GO.`,
+  imp_scanning:'Looking through the folder…',
+  f_all_kinds:'All types', kind_csv:'CSV', kind_excel:'Excel', kind_camt:'CAMT (XML)', kind_pdf:'PDF', kind_image:'Images',
+  f_all_states:'All states', f_todo:'To import (new and changed)', f_imported:'Imported', f_failed:'Failed',
+  go_btn:n=>`▶ GO — import ${n}`,
+  go_confirm:n=>`Import ${n} ${n===1?'file':'files'} now?`,
+  st_new:'🆕 new', st_changed:'✎ changed', st_imported:d=>`✓ imported ${d}`, st_failed:'✕ failed',
+  st_changed_title:'A file with this name was imported before, but its content is different.',
+  col_result:'Result', col_time:'Time', history_title:'Import history', hist_empty:'No imports yet.',
+  err_folder_missing:'Folder does not exist', err_file_missing:'File is no longer in the folder',
+  dup_hint:'The same movement twice → delete one (✕). PayPal top-up or card repayment → mark the bank side as a transfer. Two different movements → leave them.',
+  dup_this:'this import', dup_transfer_btn:'→ transfer',
+  dup_transfer_title:'Mark as a transfer between accounts (PayPal top-up, card repayment)',
+  dup_delete_title:'Delete this transaction (a real duplicate)',
+  dup_delete_confirm:(d, a)=>`Delete the transaction ${d} ${a}?`,
+  hist_dups:(n, of)=>`⚠ ${n} possible duplicates (already in ${of})`, hist_older:'an older import', hist_undone:'↶ undone',
+  undo_btn:'Undo import', undo_confirm:(n, f)=>`Undo the import of "${f}"? Its ${n} transactions are deleted, with their categories.`,
+  undo_done:n=>`${n} transactions deleted.`,
+  err_already_imported:'This file was already imported into this account — import',
+  acc_main_view:'Main account', acc_satellite_view:'Satellite accounts', acc_custom_view:'Custom selection',
+  acc_selected:(n, m)=>`Accounts: ${n} of ${m}`,
+  col_coverage:'Data', bal_known:d=>`known on ${d}`, bal_unknown:'no known balance',
+  bal_set_title:'Enter the real balance on a date (from online banking or a statement)',
+  bal_prompt_amount:n=>`Real balance of "${n}" at the end of the day (e.g. 1,234.56; empty = remove):`,
+  bal_prompt_date:'On the date (YYYY-MM-DD or DD.MM.YYYY):', bal_bad_amount:'Invalid amount.',
+  err_invalid_date:'Invalid date',
+  err_name_required:'Enter a name for the account', err_name_taken:'An account with this name already exists',
+  cov_late:l=>`⚠ Data missing at the start of the period: ${l}`, cov_from:(n, d)=>`${n} only from ${d}`, cov_none:n=>`${n} none`,
+  check_title:'Check: enter the real balance from the bank and compare it with the app',
+  check_prompt:n=>`Check "${n}": balance at the bank at the end of the day (booked balance, not available):`,
+  check_ok:c=>`✓ Matches: ${fmt(c.amount)} on ${c.date}.`,
+  check_diff:c=>`⚠ Does not match on ${c.date}: bank ${fmt(c.amount)}, app ${fmt(c.expected)}, off by ${fmt(c.difference)}.\nFilter this account under Transactions and compare the balance after each movement with the bank to find the day.`,
+  check_ok_short:d=>`✓ matches the bank on ${d}`, check_diff_short:(x, d)=>`⚠ off by ${x} on ${d}`,
+  check_line:c=>`${c.date}: bank ${fmt(c.amount)}, app ${fmt(c.expected)}${c.difference ? ', off by '+fmt(c.difference) : ' ✓'}`,
+  col_amount_running:'Amount / balance', running_title:'Balance after this movement (at the end of the day it must match the bank)',
+  acc_no_main:'No account is marked as main, so all are shown. Mark it with ⭐ on the Import tab.',
+  transfers_other:'Transfers to/from other accounts', main_toggle:'Main account (salaries)',
   err_empty_name:'Name must not be empty.', err_duplicate_category:'A category with this name already exists.',
   cat_groceries:'Groceries', cat_housing:'Housing', cat_energy:'Energy', cat_transport:'Transport',
   cat_car:'Car', cat_restaurants:'Restaurants', cat_health:'Health', cat_clothing:'Clothing',
@@ -441,29 +668,171 @@ function shiftPeriod(dir) {
   loadOverview();
 }
 
+// Which accounts the overview covers: the main one(s) by default, the satellites (PayPal,
+// cards) without them, all, or a custom choice. Remembered in this browser.
+let ovAccounts = [];
+function ovPick() {
+  try { return JSON.parse(localStorage.getItem('ovAccounts')) || {preset:'main', ids:[]}; }
+  catch { return {preset:'main', ids:[]}; }
+}
+function saveOvPick(pick) { try { localStorage.setItem('ovAccounts', JSON.stringify(pick)); } catch {} }
+function ovSelected() {
+  const pick = ovPick(), all = ovAccounts.map(a => a.id), mains = ovAccounts.filter(a => a.is_main).map(a => a.id);
+  if (pick.preset === 'main') return mains.length ? mains : all;
+  if (pick.preset === 'satellite') return ovAccounts.filter(a => !a.is_main).map(a => a.id);
+  if (pick.preset === 'custom') return pick.ids.filter(id => all.includes(id));
+  return all;
+}
+function renderOvPick(sel) {
+  const pick = ovPick();
+  $('#ovAccPreset').value = pick.preset;
+  $('#ovAccList').innerHTML = ovAccounts.map(a => `<label><input type="checkbox" value="${a.id}"
+    ${sel.includes(a.id) ? 'checked' : ''} onchange="pickAccounts()"> ${a.is_main ? '⭐ ' : ''}${esc(a.name)}</label>`).join('');
+  $('#ovAccSummary').textContent = t('acc_selected')(sel.length, ovAccounts.length);
+  $('#ovAccHint').textContent = pick.preset === 'main' && !ovAccounts.some(a => a.is_main) ? t('acc_no_main') : '';
+}
+function coverageHint(sel, from) {
+  const late = ovAccounts.filter(a => sel.includes(a.id) && (!a.first_date || a.first_date > from));
+  $('#ovCoverage').textContent = late.length ? t('cov_late')(late.map(a =>
+    a.first_date ? t('cov_from')(a.name, a.first_date) : t('cov_none')(a.name)).join(', ')) : '';
+}
+function pickAccounts() {
+  saveOvPick({preset:'custom', ids:[...document.querySelectorAll('#ovAccList input:checked')].map(i => +i.value)});
+  loadOverview();
+}
+
 async function loadOverview() {
   const p = $('#ovPreset').value;
   const [from, to] = presetRange(p);
   if (p !== 'custom') { $('#ovFrom').value = from; $('#ovTo').value = to; }
   if (!from || !to) return;
-  const [ov, nw] = await Promise.all([
-    api(`/api/overview?date_from=${from}&date_to=${to}`), api('/api/networth')]);
+  ovAccounts = await api('/api/accounts');
+  const sel = ovSelected(), all = sel.length === ovAccounts.length;
+  renderOvPick(sel);
+  coverageHint(sel, from);
+  const accParam = all ? '' : `&accounts=${sel.join(',')}`;
+  const [ov, nw, bal] = await Promise.all([
+    api(`/api/overview?date_from=${from}&date_to=${to}` + accParam),
+    api('/api/networth'),
+    api(`/api/balances?date_from=${from}&date_to=${to}` + accParam)]);
   $('#ovIncome').textContent = fmt(ov.income);
   $('#ovExpense').textContent = fmt(ov.expense);
-  const net = ov.income + ov.expense;
+  // transfers to and from the accounts left out; among all accounts they cancel out
+  $('#ovTransfersCard').classList.toggle('hidden', all && Math.abs(ov.transfers) < 0.005);
+  $('#ovTransfers').textContent = fmt(ov.transfers);
+  const net = ov.income + ov.expense + ov.transfers;
   $('#ovNet').textContent = fmt(net); $('#ovNet').className = 'value ' + (net>=0?'green':'red');
   $('#ovNW').textContent = fmt(nw.net_worth);
   chart('catChart', {type:'doughnut', data:{labels:ov.by_category.map(x=>catLabel(x.category_key, x.category)),
     datasets:[{data:ov.by_category.map(x=>x.spent)}]},
-    options:{plugins:{legend:{position:'right',labels:{color:'#e8ecf4'}}}}});
+    options:{maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{color:'#e8ecf4'}}}}});
   chart('monthChart', {type:'bar', data:{labels:ov.monthly.map(x=>x.month),
     datasets:[{label:t('income'),data:ov.monthly.map(x=>x.income),backgroundColor:'#3ecf8e'},
               {label:t('expenses'),data:ov.monthly.map(x=>x.expense),backgroundColor:'#ff6b6b'}]},
-    options:{scales:{x:{ticks:{color:'#8b96ab'}},y:{ticks:{color:'#8b96ab'}}},
+    options:{maintainAspectRatio:false, scales:{x:{ticks:{color:'#8b96ab'}},y:{ticks:{color:'#8b96ab'}}},
              plugins:{legend:{labels:{color:'#e8ecf4'}}}}});
+  balanceChart(bal);
+}
+
+// Overview panels, as on a dashboard: shown or hidden from the 📊 menu, collapsed to their title
+// by clicking it; remembered in this browser. A chart that shows again resizes by itself.
+function panelState() {
+  try {
+    const s = JSON.parse(localStorage.getItem('ovPanels')) || {};
+    return {hidden: s.hidden || [], collapsed: s.collapsed || []};
+  } catch { return {hidden: [], collapsed: []}; }
+}
+function savePanels(s) { try { localStorage.setItem('ovPanels', JSON.stringify(s)); } catch {} }
+function applyPanels() {
+  const s = panelState();
+  document.querySelectorAll('#tab-overview [data-panel]').forEach(p => {
+    p.classList.toggle('hidden', s.hidden.includes(p.dataset.panel));
+    p.classList.toggle('collapsed', s.collapsed.includes(p.dataset.panel));
+  });
+  document.querySelectorAll('#ovPanels input').forEach(i => { i.checked = !s.hidden.includes(i.value); });
+}
+function togglePanel(input) {
+  const s = panelState();
+  s.hidden = s.hidden.filter(x => x !== input.value).concat(input.checked ? [] : [input.value]);
+  savePanels(s); applyPanels();
+}
+function collapsePanel(head) {
+  const id = head.closest('[data-panel]').dataset.panel, s = panelState();
+  s.collapsed = s.collapsed.includes(id) ? s.collapsed.filter(x => x !== id) : [...s.collapsed, id];
+  savePanels(s); applyPanels();
+}
+
+// End-of-day balance per account: the balance holds until the next movement (a stepped line),
+// the total once every account has data, and the balance checks as points (✓ matches, ⚠ off)
+const BAL_COLORS = ['#4f8cff', '#3ecf8e', '#f5a623', '#c77dff', '#ff6b6b', '#2ec4d6', '#e5d352', '#ff8fab'];
+function balanceChart(bal) {
+  const ms = d => Date.parse(d), day = v => new Date(v).toISOString().slice(0, 10);
+  const lines = bal.accounts.filter(a => a.points.length);
+  $('#balEmpty').classList.toggle('hidden', lines.length > 0);
+  $('.bal-chart').classList.toggle('hidden', !lines.length);
+  // holes in a history: the line breaks there, the balances before it follow the bank's own
+  $('#balGaps').textContent = lines.flatMap(a => a.gaps.map(g => t('bal_gap')(a.name, g.from, g.to))).join(' · ');
+  const datasets = lines.map((a, i) => ({
+    label: (a.is_main ? '⭐ ' : '') + a.name, data: a.points.map(p => ({x: ms(p.date), y: p.balance})),
+    borderColor: BAL_COLORS[i % BAL_COLORS.length], backgroundColor: BAL_COLORS[i % BAL_COLORS.length],
+    stepped: 'after', pointRadius: 0, pointHitRadius: 6, borderWidth: 2}));
+  if (lines.length > 1 && bal.total.length)
+    datasets.push({label: t('bal_total'), data: bal.total.map(p => ({x: ms(p.date), y: p.balance})),
+      borderColor: '#e8ecf4', backgroundColor: '#e8ecf4', borderDash: [6, 4], stepped: 'after',
+      pointRadius: 0, pointHitRadius: 6, borderWidth: 1.5});
+  const DAY = 86400000, xMin = lines.length ? Math.min(...lines.map(a => ms(a.points[0].date))) : undefined;
+  const step = xMin === undefined ? undefined : DAY * Math.max(1, Math.ceil((ms(bal.to) - xMin) / DAY / 8));
+  const checks = lines.flatMap(a => a.checks.map(c => ({x: ms(c.date), y: c.amount, acc: a.name, diff: c.difference})));
+  if (checks.length)
+    datasets.push({type: 'scatter', label: t('bal_checks'), data: checks,
+      pointRadius: checks.map(c => c.diff ? 7 : 5), pointHoverRadius: 9,
+      pointStyle: checks.map(c => c.diff ? 'triangle' : 'circle'),
+      backgroundColor: checks.map(c => c.diff ? '#ff6b6b' : '#3ecf8e'), borderColor: '#0f1420'});
+  chart('balChart', {type: 'line', data: {datasets},
+    options: {maintainAspectRatio: false, interaction: {mode: 'nearest', intersect: false},
+      scales: {x: {type: 'linear', min: xMin, max: ms(bal.to),   // whole days, at most ~8 labels
+                   ticks: {color: '#8b96ab', stepSize: step, callback: v => day(v)}},
+               y: {ticks: {color: '#8b96ab', callback: v => fmt(v)}}},
+      plugins: {legend: {labels: {color: '#e8ecf4'}},
+        tooltip: {callbacks: {title: items => items.length ? day(items[0].parsed.x) : '',
+          label: c => c.raw.acc === undefined ? `${c.dataset.label}: ${fmt(c.parsed.y)}`
+            : c.raw.diff ? t('bal_check_off')(c.raw.acc, fmt(c.raw.y), fmt(c.raw.diff))
+            : t('bal_check_ok')(c.raw.acc, fmt(c.raw.y))}}}}});
+}
+
+// Period of the Transactions tab: a year (or all) and a month of it (or the whole year). Two
+// plain lists instead of a month input, whose year cannot be changed on its own.
+let txPeriod = null;   // {year, month}: '' = all years / the whole year
+async function fillTxPeriod() {
+  if (!txPeriod) txPeriod = {year: thisMonth.slice(0, 4), month: thisMonth.slice(5)};
+  const years = await api('/api/transactions/years');
+  for (const y of [thisMonth.slice(0, 4), txPeriod.year]) if (y && !years.includes(y)) years.push(y);
+  years.sort().reverse();
+  $('#txYear').innerHTML = `<option value="">${t('all_years')}</option>` +
+    years.map(y => `<option value="${y}">${y}</option>`).join('');
+  const names = new Intl.DateTimeFormat(LOCALE[lang], {month: 'long'});
+  $('#txMonth').innerHTML = `<option value="">${t('whole_year')}</option>` +
+    Array.from({length: 12}, (_, i) => String(i + 1).padStart(2, '0')).map(m =>
+      `<option value="${m}">${names.format(new Date(2000, +m - 1, 15))}</option>`).join('');
+  $('#txYear').value = txPeriod.year;
+  $('#txMonth').value = txPeriod.month;
+  $('#txMonth').disabled = !txPeriod.year;
+}
+function readTxPeriod() { txPeriod = {year: $('#txYear').value, month: $('#txMonth').value}; }
+// ◀ ▶: the previous or next month, or year when the whole year is shown
+function shiftTxPeriod(step) {
+  const {year, month} = txPeriod || {};
+  if (!year) return;
+  if (!month) txPeriod.year = String(+year + step);
+  else {
+    const d = new Date(+year, +month - 1 + step, 15);
+    txPeriod = {year: String(d.getFullYear()), month: String(d.getMonth() + 1).padStart(2, '0')};
+  }
+  loadTransactions();
 }
 
 async function loadTransactions() {
+  await fillTxPeriod();
   {
     const accs = await api('/api/accounts');
     const cur = $('#txAccount').value;
@@ -472,7 +841,9 @@ async function loadTransactions() {
     $('#txAccount').value = cur;
   }
   const p = new URLSearchParams();
-  if ($('#txMonth').value) p.set('month', $('#txMonth').value);
+  const year = $('#txYear').value, month = $('#txMonth').value;
+  if (year && month) p.set('month', `${year}-${month}`);
+  else if (year) { p.set('year', year); p.set('limit', '10000'); }   // a whole year has more than 500
   if ($('#txAccount').value) p.set('account_id', $('#txAccount').value);
   if ($('#txSearch').value) p.set('q', $('#txSearch').value);
   if ($('#txUncat').checked) p.set('uncategorized','true');
@@ -487,8 +858,10 @@ async function loadTransactions() {
     <td class="nowrap" title="${(t2.description||'').replace(/"/g,'&quot;')}">${t2.description||''}</td>
     <td class="nowrap" title="${(t2.counterparty||'').replace(/"/g,'&quot;')}">${t2.counterparty||''}</td>
     <td><select onchange="setCat(${t2.id}, this.value)">${opts(t2.category_id)}</select></td>
-    <td class="num ${t2.amount>=0?'green':'red'}">${fmt(t2.amount)}</td>
+    <td class="num"><span class="${t2.amount>=0?'green':'red'}">${fmt(t2.amount)}</span>${t2.running_balance == null
+      ? '' : `<br><span class="hint" title="${esc(t('running_title'))}">${fmt(t2.running_balance)}</span>`}</td>
     <td><button class="btn" onclick="delTx(${t2.id})">✕</button></td></tr>`).join('');
+  $('#txAmountHead').textContent = t($('#txAccount').value ? 'col_amount_running' : 'col_amount');
 }
 async function setCat(id, v) {
   await api('/api/transactions/'+id, {method:'PATCH', headers:{'Content-Type':'application/json'},
@@ -582,13 +955,75 @@ async function addAccount() {
     $('#newAccName').value=''; loadImport();
   } catch(e) { alert(e.message); }
 }
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 async function loadImport() {
   const accs = await api('/api/accounts');
   $('#accTable tbody').innerHTML = accs.map(a => `<tr>
-    <td>${a.name}</td><td class="hint">${t('acct_'+a.type) !== 'acct_'+a.type ? t('acct_'+a.type) : a.type}</td>
-    <td class="num">${fmt(a.balance)}</td>
+    <td><button class="btn star" title="${esc(t('main_toggle'))}" onclick="toggleMain(${a.id}, ${!a.is_main})">${a.is_main ? '⭐' : '☆'}</button></td>
+    <td>${esc(a.name)}</td><td class="hint">${t('acct_'+a.type) !== 'acct_'+a.type ? t('acct_'+a.type) : a.type}</td>
+    <td class="nowrap hint">${a.first_date ? `${a.first_date} – ${a.last_date}` : '–'}</td>
+    <td class="num">${fmt(a.balance)}<br><span class="hint ${a.balance_date ? '' : 'warn'}">${a.balance_date
+      ? t('bal_known')(a.balance_date) : t('bal_unknown')}</span>${checkStatus(a)}</td>
+    <td><button class="btn" title="${esc(t('bal_set_title'))}" onclick="setBalance(${a.id})">✎</button></td>
+    <td><button class="btn" title="${esc(t('check_title'))}" onclick="checkBalance(${a.id})">⚖</button></td>
     <td><button class="btn" onclick="delAccount(${a.id}, '${a.name.replace(/'/g,"\\'")}')">✕</button></td></tr>`).join('');
+  impAccs = accs;
+  loadHistory();
+  if (!folderScanned) { folderScanned = true; scanFolder(accs); }
+  else renderImpTable(accs);
   return accs;
+}
+async function toggleMain(id, on) {
+  await api('/api/accounts/'+id, {method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({is_main: on})});
+  loadImport();
+}
+// A known balance (from the banking app, a statement) at the end of a day: the balance no
+// longer depends on having the whole history. An empty amount removes it.
+// Ask for a balance and its day: {amount, date}, {amount:null} for an empty amount, null when cancelled
+function askBalance(question, amount, day) {
+  const text = prompt(question, amount ?? '');
+  if (text === null) return null;
+  if (!text.trim()) return {amount: null};
+  let v = text.replace(/[\s€]/g, '');
+  // the last separator is the decimal one: 1.234,56 or 1,234.56
+  v = v.lastIndexOf(',') > v.lastIndexOf('.') ? v.replace(/\./g, '').replace(',', '.') : v.replace(/,/g, '');
+  if (v === '' || isNaN(+v)) { alert(t('bal_bad_amount')); return null; }
+  const when = prompt(t('bal_prompt_date'), day || ymd(new Date()));
+  if (when === null) return null;
+  const m = when.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);   // 31.10.2026
+  return {amount: +v, date: m ? `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}` : when.trim()};
+}
+async function setBalance(id) {
+  const a = impAccs.find(x => x.id === id);
+  const b = askBalance(t('bal_prompt_amount')(a.name), a.balance_amount, a.balance_date);
+  if (!b) return;
+  const body = b.amount === null ? {balance_amount: null} : {balance_amount: b.amount, balance_date: b.date};
+  try {
+    await api('/api/accounts/'+id, {method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)});
+    loadImport();
+  } catch(e) { alert(e.message); }
+}
+// Balance checks: the real balance from the bank next to the computed one; the anchor stays
+function checkStatus(a) {
+  const c = a.checks?.[0];
+  if (!c) return '';
+  const title = a.checks.map(x => t('check_line')(x)).join('\n');
+  return `<br><span class="hint ${c.difference ? 'warn' : 'ok'}" title="${esc(title)}">${c.difference
+    ? t('check_diff_short')(fmt(c.difference), c.date) : t('check_ok_short')(c.date)}</span>`;
+}
+async function checkBalance(id) {
+  const a = impAccs.find(x => x.id === id);
+  const b = askBalance(t('check_prompt')(a.name), '', a.checks?.[0]?.date);
+  if (!b || b.amount === null) return;
+  try {
+    const c = await api(`/api/accounts/${id}/checks`, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(b)});
+    alert(c.difference ? t('check_diff')(c) : t('check_ok')(c));
+    loadImport();
+  } catch(e) { alert(e.message); }
 }
 async function delAccount(id, name) {
   if (!confirm(t('del_acc_confirm')(name))) return;
@@ -596,12 +1031,45 @@ async function delAccount(id, name) {
   catch(e) { alert(e.message); }
 }
 
-// several statements at once: the server says what each file is and where it belongs
-let impRows = [];
+// Statements from the folder and picked files, in one table. Looking at them writes nothing;
+// only GO imports the ticked rows that the filters show.
+let folderRows = [], pickedRows = [], impRows = [], impAccs = [], folderScanned = false;
+let ownProposals = [];  // new accounts named by the user in the account picker
+const STATE_ORDER = {new:0, changed:1, failed:2, imported:3};
+const sortRows = rows => rows.sort((a, b) => (STATE_ORDER[a.state] - STATE_ORDER[b.state]) || (a.gemma - b.gemma)
+  || (a.key||'').localeCompare(b.key||'') || (a.date_from||'').localeCompare(b.date_from||''));
+const usable = r => !r.error && r.count !== 0;
+function prepare(rows, source) {
+  rows.forEach(r => {
+    r.source = source;
+    r.checked = usable(r) && !r.gemma && (r.state === 'new' || r.state === 'changed');
+  });
+  return sortRows(rows);
+}
+
+async function saveDir() {
+  try {
+    await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({imports_dir: $('#impDir').value})});
+    scanFolder();
+  } catch(e) { $('#impResult').textContent = t('error')+': '+e.message; }
+}
+async function scanFolder(accs) {
+  $('#impResult').textContent = t('imp_scanning');
+  try {
+    const [res, a] = await Promise.all([api('/api/folder'), accs || api('/api/accounts')]);
+    $('#impDir').value = res.dir || '';
+    folderRows = prepare(res.files, 'folder');
+    $('#impResult').textContent = res.dir ? t('imp_folder_files')(res.files.length, res.dir) : t('imp_no_folder');
+    renderImpTable(a);
+  } catch(e) {
+    folderRows = [];
+    $('#impResult').textContent = t('error')+': '+e.message;
+    renderImpTable(accs || await api('/api/accounts'));
+  }
+}
 async function previewFiles() {
   const files = [...$('#impFiles').files];
-  $('#impTable').classList.toggle('hidden', !files.length);
-  $('#impAllBtn').disabled = true;
   if (!files.length) return;
   $('#impResult').textContent = t('analyzing');
   const fd = new FormData();
@@ -609,71 +1077,190 @@ async function previewFiles() {
   try {
     const rows = await api('/api/import/preview', {method:'POST', body:fd});
     rows.forEach((r, i) => { r.fileObj = files[i]; });
-    // known formats first, grouped by account source, oldest period first
-    impRows = rows.sort((a, b) => (a.gemma - b.gemma) || (a.key||'').localeCompare(b.key||'')
-                                   || (a.date_from||'').localeCompare(b.date_from||''));
+    pickedRows = prepare(rows, 'upload');
     $('#impResult').textContent = '';
-    renderImpTable(await loadImport());
+    renderImpTable(await api('/api/accounts'));
   } catch(e) { $('#impResult').textContent = t('error')+': '+e.message; }
 }
+
+function visible(r) {
+  const kind = $('#impKind').value, state = $('#impState').value;
+  return (!kind || r.kind === kind)
+      && (!state || (state === 'todo' ? r.state === 'new' || r.state === 'changed' : r.state === state));
+}
+function stateCell(r) {
+  if (r.state === 'imported') return `<span class="ok">${t('st_imported')((r.last?.imported_at||'').slice(0,16))}</span>`;
+  if (r.state === 'failed') return `<span class="bad" title="${esc(t('err_'+r.last?.error_code))}">${t('st_failed')}</span>`;
+  if (r.state === 'changed') return `<span class="warn" title="${esc(t('st_changed_title'))}">${t('st_changed')}</span>`;
+  return t('st_new');
+}
 function renderImpTable(accs) {
-  const proposals = [...new Map(impRows.filter(r => r.proposal && !accs.some(a => a.name === r.proposal.name))
-                                       .map(r => [r.proposal.name, r.proposal])).values()];
+  impAccs = accs;
+  impRows = [...pickedRows, ...folderRows];
+  const proposals = [...new Map([...impRows.map(r => r.proposal).filter(Boolean), ...ownProposals]
+    .filter(p => !accs.some(a => a.name === p.name)).map(p => [p.name, p])).values()];
+  const selected = r => r.sel ?? (r.account_id ? String(r.account_id)
+              : r.proposal && proposals.some(p => p.name === r.proposal.name) ? 'new:'+r.proposal.name : '');
   const options = r => {
-    const sel = r.account_id ? String(r.account_id)
-              : r.proposal && proposals.some(p => p.name === r.proposal.name) ? 'new:'+r.proposal.name : '';
+    const sel = selected(r);
     return `<option value="">${t('choose_account')}</option>` +
-      accs.map(a => `<option value="${a.id}" ${String(a.id)===sel?'selected':''}>${a.name}</option>`).join('') +
-      proposals.map(p => `<option value="new:${p.name}" ${'new:'+p.name===sel?'selected':''}>${t('new_account_opt')(p.name)}</option>`).join('');
+      accs.map(a => `<option value="${a.id}" ${String(a.id)===sel?'selected':''}>${esc(a.name)}</option>`).join('') +
+      proposals.map(p => `<option value="new:${esc(p.name)}" ${'new:'+p.name===sel?'selected':''}>${esc(t('new_account_opt')(p.name))}</option>`).join('') +
+      `<option value="ask">${esc(t('new_account_ask'))}</option>`;
   };
-  $('#impTable tbody').innerHTML = impRows.map((r, i) => {
-    const empty = r.count === 0, usable = !r.error && !empty;
+  const shown = impRows.map((r, i) => [r, i]).filter(([r]) => visible(r));
+  $('#impTable').classList.toggle('hidden', !impRows.length);
+  $('#impTable tbody').innerHTML = shown.map(([r, i]) => {
+    const ok = usable(r), name = r.path || r.file;
     const period = r.date_from ? `${r.date_from} – ${r.date_to}` : '–';
-    const status = r.error ? t('error')+': '+r.error : empty ? t('imp_empty') : '';
+    const problem = r.error ? t('error')+': '+r.error : r.count === 0 ? t('imp_empty')
+                  : r.no_amount ? t('imp_no_amount')(r.no_amount) : '';
     return `<tr>
-      <td><input type="checkbox" id="impChk${i}" ${usable && !r.gemma ? 'checked' : ''} ${usable ? '' : 'disabled'}></td>
-      <td class="file" title="${r.file}">${r.file}</td>
-      <td>${r.format || (r.gemma ? t('fmt_gemma') : '–')}</td>
+      <td><input type="checkbox" ${r.checked ? 'checked' : ''} ${ok ? '' : 'disabled'} onchange="impRows[${i}].checked=this.checked; updateGo()"></td>
+      <td class="file" title="${esc(name)}">${esc(name)}</td>
+      <td class="hint">${r.kind ? t('kind_'+r.kind) : '–'}</td>
+      <td>${esc(r.format || (r.gemma ? t('fmt_gemma') : '–'))}</td>
       <td class="nowrap hint">${period}</td>
       <td class="num">${r.count ?? '–'}</td>
-      <td><select id="impAcc${i}" ${usable ? '' : 'disabled'}>${options(r)}</select></td>
-      <td class="hint" id="impStatus${i}">${status}</td></tr>`;
+      <td class="state">${stateCell(r)}</td>
+      <td><select ${ok ? '' : 'disabled'} onchange="pickAccount(${i}, this)">${options(r)}</select></td>
+      <td class="hint" id="impStatus${i}">${esc(r.result || problem)}</td></tr>`;
   }).join('');
-  $('#impAllBtn').disabled = !impRows.some(r => !r.error && r.count !== 0);
+  shown.forEach(([r]) => { r.sel = selected(r); });
+  updateGo();
+}
+// "other new account…": ask for its name; it is created on GO like a proposed one
+function pickAccount(i, el) {
+  const r = impRows[i];
+  if (el.value !== 'ask') { r.sel = el.value; return; }
+  const name = (prompt(t('new_account_prompt')) || '').trim();
+  if (name) {
+    const existing = impAccs.find(a => a.name.toLowerCase() === name.toLowerCase());
+    if (!existing && !ownProposals.some(p => p.name === name)) ownProposals.push({name, type:'other'});
+    r.sel = existing ? String(existing.id) : 'new:'+name;
+  }
+  renderImpTable(impAccs);
+}
+const goRows = () => impRows.filter(r => r.checked && usable(r) && visible(r));
+function updateGo() {
+  const n = goRows().length, shown = impRows.filter(r => usable(r) && visible(r));
+  $('#impGoBtn').textContent = t('go_btn')(n);
+  $('#impGoBtn').disabled = !n;
+  $('#impChkAll').checked = shown.length > 0 && shown.every(r => r.checked);
+}
+function checkAll(on) {
+  impRows.filter(r => usable(r) && visible(r)).forEach(r => { r.checked = on; });
+  renderImpTable(impAccs);
 }
 async function importAll() {
-  $('#impAllBtn').disabled = true;
+  const rows = goRows();
+  if (!rows.length || !confirm(t('go_confirm')(rows.length))) return;
+  $('#impGoBtn').disabled = true;
   const created = {};
-  for (const [i, r] of impRows.entries()) {
-    if (!$('#impChk'+i).checked) continue;
-    const status = $('#impStatus'+i);
-    let acc = $('#impAcc'+i).value;
-    if (!acc) { status.textContent = t('imp_need_account'); continue; }
+  for (const r of rows) {
+    const status = $('#impStatus'+impRows.indexOf(r));
+    const show = text => { r.result = text; if (status) status.textContent = text; };
+    let acc = r.sel;
+    if (!acc) { show(t('imp_need_account')); continue; }
     try {
       if (acc.startsWith('new:')) {
-        const p = impRows.find(x => x.proposal && 'new:'+x.proposal.name === acc).proposal;
+        const p = [...impRows.map(x => x.proposal).filter(Boolean), ...ownProposals]
+          .find(x => 'new:'+x.name === acc);
         if (!created[p.name]) {
           await api('/api/accounts', {method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({name:p.name, type:p.type})});
           created[p.name] = (await api('/api/accounts')).find(a => a.name === p.name).id;
         }
-        acc = created[p.name];
+        acc = String(created[p.name]);
       }
-      status.textContent = t('imp_running');
-      const fd = new FormData();
-      fd.append('account_id', acc);
-      fd.append('file', r.fileObj);
-      status.textContent = t('imp_row_done')(await api('/api/import', {method:'POST', body:fd}));
-      $('#impChk'+i).checked = false;
-    } catch(e) { status.textContent = t('error')+': '+e.message; }
+      show(t('imp_running'));
+      let res;
+      if (r.source === 'folder') {
+        res = await api('/api/folder/import', {method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({path:r.path, account_id:+acc})});
+      } else {
+        const fd = new FormData();
+        fd.append('account_id', acc);
+        fd.append('file', r.fileObj);
+        res = await api('/api/import', {method:'POST', body:fd});
+      }
+      show(t('imp_row_done')(res));
+      Object.assign(r, {state:'imported', checked:false, sel:acc,
+                        last:{imported_at: ymd(new Date())+' '+new Date().toTimeString().slice(0,5)}});
+    } catch(e) {
+      show(t('error')+': '+e.message);
+      if (r.state !== 'imported') r.state = 'failed';
+    }
   }
-  const accs = await loadImport();
   // newly created accounts become ordinary choices for the rows still left
-  impRows.forEach((r, i) => { const sel = $('#impAcc'+i); r.account_id = +sel.value || created[(sel.value||'').slice(4)] || r.account_id; });
-  const statuses = impRows.map((_, i) => $('#impStatus'+i).textContent);
-  const checks = impRows.map((_, i) => $('#impChk'+i).checked);
-  renderImpTable(accs);
-  impRows.forEach((_, i) => { $('#impStatus'+i).textContent = statuses[i]; $('#impChk'+i).checked = checks[i]; });
+  impRows.forEach(r => { if (r.sel?.startsWith('new:') && created[r.sel.slice(4)]) r.sel = String(created[r.sel.slice(4)]); });
+  loadImport();
+}
+
+let histRows = [], openDups = null, dupPairs = [];
+async function loadHistory() {
+  const rows = histRows = await api('/api/imports');
+  if (openDups && !rows.some(r => r.id === openDups && r.duplicates)) openDups = null;
+  dupPairs = openDups ? await api(`/api/imports/${openDups}/duplicates`) : [];
+  const result = r => {
+    if (r.status === 'undone') return `<span class="hint">${t('hist_undone')}</span>`;
+    if (r.status !== 'ok') return `<span class="bad">${esc(t('err_'+r.error_code) + (r.error_info ? ': '+r.error_info : ''))}</span>`;
+    const dups = r.duplicates ? ` <a class="warn" onclick="toggleDups(${r.id})">${t('hist_dups')(r.duplicates,
+      r.duplicate_of.map(id => id ? '#'+id : t('hist_older')).join(', '))}</a>` : '';
+    // the live duplicate count replaces the one reported at import time
+    return `<span class="ok">${t('imp_row_done')({...r, possible_duplicates:0})}</span>${dups}`;
+  };
+  // undo first: the result column can be wide, and the table scrolls sideways
+  $('#histTable tbody').innerHTML = rows.length ? rows.map(r => `<tr>
+    <td>${r.status === 'ok' && r.remaining ? `<button class="btn" title="${esc(t('undo_btn'))}"
+      onclick="undoImport(${r.id})">↶</button>` : ''}</td>
+    <td class="hint">#${r.id}</td>
+    <td class="nowrap hint">${esc(r.imported_at.slice(0,16))}</td>
+    <td class="file" title="${esc(r.file_name)}">${esc(r.file_name)}</td>
+    <td>${esc(r.format || '–')}</td>
+    <td>${esc(r.account || '–')}</td>
+    <td class="nowrap hint">${r.date_from ? `${r.date_from} – ${r.date_to}` : '–'}</td>
+    <td class="state">${result(r)}</td></tr>` + (r.id === openDups ? dupsRow() : '')).join('')
+    : `<tr><td colspan="8" class="hint">${t('hist_empty')}</td></tr>`;
+}
+
+// The pairs behind "possible duplicates": the user decides what each one is
+function dupsRow() {
+  const side = (x, label) => `<td class="side"><span class="hint">${label} · ${esc(x.account)}</span><br>
+    ${esc([x.counterparty, x.description].filter(Boolean).join(' · ') || '–')}<br>
+    <button class="btn" title="${esc(t('dup_transfer_title'))}" onclick="dupTransfer(${x.id})">${t('dup_transfer_btn')}</button>
+    <button class="btn" title="${esc(t('dup_delete_title'))}" onclick="dupDelete(${x.id})">✕</button></td>`;
+  return `<tr class="dups"><td colspan="8"><p class="hint">${t('dup_hint')}</p><table class="pairs">` +
+    dupPairs.map(d => `<tr><td class="nowrap">${d.date}</td><td class="num nowrap">${fmt(d.amount)}</td>
+      ${side(d.tx, t('dup_this'))}
+      ${side(d.twin, d.twin.import_id ? '#'+d.twin.import_id : t('hist_older'))}</tr>`).join('') +
+    `</table></td></tr>`;
+}
+function toggleDups(id) {
+  openDups = openDups === id ? null : id;
+  loadHistory();
+}
+async function dupTransfer(txId) {
+  const transfer = (await api('/api/categories')).find(c => c.key === 'transfer');
+  await api('/api/transactions/'+txId, {method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({category_id: transfer.id})});
+  loadHistory();
+}
+async function dupDelete(txId) {
+  const d = dupPairs.find(p => p.tx.id === txId || p.twin.id === txId);
+  if (!confirm(t('dup_delete_confirm')(d.date, fmt(d.amount)))) return;
+  await api('/api/transactions/'+txId, {method:'DELETE'});
+  loadHistory();
+}
+async function undoImport(id) {
+  const r = histRows.find(x => x.id === id);
+  if (!confirm(t('undo_confirm')(r.remaining, r.file_name))) return;
+  try {
+    const res = await api('/api/imports/'+id, {method:'DELETE'});
+    await scanFolder();
+    await loadImport();
+    $('#impResult').textContent = t('undo_done')(res.deleted);
+  } catch(e) { alert(e.message); }
 }
 
 function load(tab) {
@@ -697,14 +1284,27 @@ $('#langSel').onchange = () => {
 
 (async function init() {
   applyI18n();
-  $('#txMonth').value = $('#buMonth').value = thisMonth;
+  $('#buMonth').value = thisMonth;
   $('#ovPreset').addEventListener('change', loadOverview);
+  $('#ovAccPreset').addEventListener('change', () => {
+    saveOvPick({preset:$('#ovAccPreset').value, ids:ovSelected()});
+    loadOverview();
+  });
   $('#impFiles').addEventListener('change', previewFiles);
+  ['#impKind','#impState'].forEach(sel => {
+    try { $(sel).value = localStorage.getItem('filter'+sel) || ''; } catch {}
+    $(sel).addEventListener('change', () => {
+      try { localStorage.setItem('filter'+sel, $(sel).value); } catch {}
+      renderImpTable(impAccs);
+    });
+  });
   ['#ovFrom','#ovTo'].forEach(s => $(s).addEventListener('change', () => {
     $('#ovPreset').value = 'custom'; loadOverview();
   }));
-  ['#txMonth','#txAccount','#txSearch','#txUncat','#buMonth'].forEach(s =>
+  ['#txYear','#txMonth'].forEach(s => $(s).addEventListener('change', () => { readTxPeriod(); loadTransactions(); }));
+  ['#txAccount','#txSearch','#txUncat','#buMonth'].forEach(s =>
     $(s).addEventListener('change', () => load(document.querySelector('nav .active').dataset.tab)));
+  applyPanels();
   categories = await api('/api/categories');
   refreshStatus();
   loadOverview();

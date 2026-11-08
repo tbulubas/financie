@@ -114,3 +114,27 @@ def test_fresh_database_is_created_in_english_without_backup(tmp_path, monkeypat
     assert rows(db.DB_PATH, "SELECT name, type FROM accounts") == [db.DEFAULT_ACCOUNT]
     assert rows(db.DB_PATH, "SELECT COUNT(*) FROM categories WHERE key IS NOT NULL") == [(len(db.DEFAULT_CATEGORIES),)]
     assert list(tmp_path.glob("*-backup-*.db")) == []
+
+
+def test_v1_database_gets_the_import_history(tmp_path, monkeypatch):
+    path = tmp_path / "v1.db"
+    con = sqlite3.connect(path)
+    con.executescript(V0_SCHEMA)
+    con.execute("ALTER TABLE categories ADD COLUMN key TEXT")
+    con.execute("INSERT INTO accounts(name, type) VALUES ('Checking account', 'checking')")
+    con.execute("INSERT INTO transactions(account_id, date, amount, description, import_hash)"
+                " VALUES (1, '2026-05-01', -10, 'Shop', 'h1')")
+    con.execute("PRAGMA user_version = 1")
+    con.commit()
+    con.close()
+    monkeypatch.setattr(db, "DB_PATH", path)
+
+    db.init_db()
+    assert rows(path, "PRAGMA user_version") == [(db.SCHEMA_VERSION,)]
+    assert rows(path, "SELECT id, description, import_id FROM transactions") == [(1, "Shop", None)]
+    assert rows(path, "SELECT COUNT(*) FROM imports") == [(0,)]
+    assert rows(path, "SELECT name, is_main FROM accounts") == [("Checking account", 0)]   # v3
+    assert rows(path, "SELECT import_hash, ref FROM transactions") == [("h1", None)]       # v4
+    assert rows(path, "SELECT balance_date, balance_amount FROM accounts") == [(None, None)]   # v5
+    assert rows(path, "SELECT COUNT(*) FROM balance_checks") == [(0,)]                       # v6
+    assert len(list(tmp_path.glob("v1-backup-v1-*.db"))) == 1

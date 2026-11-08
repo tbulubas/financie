@@ -5,7 +5,8 @@
 import os
 import sqlite3
 import hashlib
-from datetime import datetime
+from bisect import bisect_right
+from datetime import date, datetime
 from pathlib import Path
 
 # project root (src/financie/db.py -> ../..); the package is installed in editable mode
@@ -14,8 +15,11 @@ PROJECT_DIR = Path(__file__).resolve().parents[2]
 # The database can live outside this folder: set FINANCIE_DB=C:\Financie\financie.db
 DB_PATH = Path(os.environ.get("FINANCIE_DB", PROJECT_DIR / "financie.db"))
 
+# Default folder with downloaded statements, until one is chosen in the UI (settings.imports_dir)
+IMPORTS_DIR = os.environ.get("FINANCIE_IMPORTS")
+
 # PRAGMA user_version of the current schema; init_db() migrates older databases
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -24,7 +28,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     type TEXT NOT NULL DEFAULT 'checking',       -- checking, savings, credit_card, cash, investment, other
     currency TEXT NOT NULL DEFAULT 'EUR',
     opening_balance REAL NOT NULL DEFAULT 0,
-    note TEXT
+    note TEXT,
+    is_main INTEGER NOT NULL DEFAULT 0,          -- 1 = main account (salaries); the rest are satellites
+    balance_date TEXT,                           -- a known balance: at the end of this day ...
+    balance_amount REAL                          -- ... the account had this much (replaces opening_balance)
 );
 
 CREATE TABLE IF NOT EXISTS categories (
@@ -45,7 +52,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     category_id INTEGER REFERENCES categories(id),
     source_file TEXT,
     import_hash TEXT UNIQUE,                     -- dedup on repeated imports
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now')),
+    import_id INTEGER REFERENCES imports(id),    -- the import that brought it, NULL before schema v2
+    ref TEXT                                     -- the source's own id (PayPal transaction code), if any
 );
 CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
 CREATE INDEX IF NOT EXISTS idx_tx_cat ON transactions(category_id);
@@ -78,6 +87,41 @@ CREATE TABLE IF NOT EXISTS asset_values (
 CREATE TABLE IF NOT EXISTS account_sources (
     source_key TEXT PRIMARY KEY,                 -- e.g. 'paypal', 'sparkasse:<hash of IBAN>'
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE
+);
+
+-- every import attempt of a statement file, successful or not
+CREATE TABLE IF NOT EXISTS imports (
+    id INTEGER PRIMARY KEY,
+    file_name TEXT NOT NULL,
+    file_hash TEXT NOT NULL,                     -- sha256 of the content: recognizes renamed copies
+    account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+    format TEXT,
+    date_from TEXT,
+    date_to TEXT,
+    status TEXT NOT NULL,                        -- ok / error / undone
+    error_code TEXT,                             -- same codes as the API errors
+    error_info TEXT,
+    inserted INTEGER NOT NULL DEFAULT 0,
+    skipped_duplicates INTEGER NOT NULL DEFAULT 0,
+    possible_duplicates INTEGER NOT NULL DEFAULT 0,
+    imported_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_imports_hash ON imports(file_hash);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+-- real balances from the bank or a statement, to check the computed balance against (schema v6)
+CREATE TABLE IF NOT EXISTS balance_checks (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    date TEXT NOT NULL,                          -- at the end of this day ...
+    amount REAL NOT NULL,                        -- ... the account had this much
+    source TEXT NOT NULL DEFAULT 'manual',       -- manual / statement
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    UNIQUE(account_id, date)
 );
 """
 
@@ -135,7 +179,17 @@ def init_db():
     con.executescript(SCHEMA)
     if existing and version < 1:
         _migrate_v0_to_v1(con)
+    if existing and version < 2:
+        _migrate_v1_to_v2(con)
+    if existing and version < 3:
+        _migrate_v2_to_v3(con)
+    if existing and version < 4:
+        _migrate_v3_to_v4(con)
+    if existing and version < 5:
+        _migrate_v4_to_v5(con)
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_key ON categories(key)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_tx_import ON transactions(import_id)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_tx_ref ON transactions(account_id, ref)")
     for key, name, kind in DEFAULT_CATEGORIES:
         con.execute("INSERT OR IGNORE INTO categories(key, name, kind) VALUES (?,?,?)", (key, name, kind))
     if con.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0:
@@ -184,6 +238,53 @@ def _migrate_v0_to_v1(con):
     print("[db] migrated schema v0 -> v1 (English codes and category names)")
 
 
+def _migrate_v1_to_v2(con):
+    """Import history: transactions remember their import. Older rows keep import_id NULL."""
+    if "import_id" not in [r["name"] for r in con.execute("PRAGMA table_info(transactions)")]:
+        con.execute("ALTER TABLE transactions ADD COLUMN import_id INTEGER REFERENCES imports(id)")
+    con.commit()
+    print("[db] migrated schema v1 -> v2 (import history)")
+
+
+def _migrate_v2_to_v3(con):
+    """Main account flag; no account is main until the user marks one."""
+    if "is_main" not in [r["name"] for r in con.execute("PRAGMA table_info(accounts)")]:
+        con.execute("ALTER TABLE accounts ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0")
+    con.commit()
+    print("[db] migrated schema v2 -> v3 (main account)")
+
+
+def _migrate_v3_to_v4(con):
+    """Source reference of a transaction, for dedup across export formats. Older rows keep NULL
+    and are still deduplicated by their import_hash."""
+    if "ref" not in [r["name"] for r in con.execute("PRAGMA table_info(transactions)")]:
+        con.execute("ALTER TABLE transactions ADD COLUMN ref TEXT")
+    con.commit()
+    print("[db] migrated schema v3 -> v4 (transaction reference)")
+
+
+def _migrate_v4_to_v5(con):
+    """A known balance per account, for accounts whose history is not complete."""
+    columns = [r["name"] for r in con.execute("PRAGMA table_info(accounts)")]
+    if "balance_date" not in columns:
+        con.execute("ALTER TABLE accounts ADD COLUMN balance_date TEXT")
+    if "balance_amount" not in columns:
+        con.execute("ALTER TABLE accounts ADD COLUMN balance_amount REAL")
+    con.commit()
+    print("[db] migrated schema v4 -> v5 (known balance)")
+
+
+def get_setting(con, key: str, default: str | None = None) -> str | None:
+    row = con.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row and row["value"] else default
+
+
+def set_setting(con, key: str, value: str | None):
+    con.execute("""INSERT INTO settings(key, value) VALUES (?,?)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value""", (key, value))
+    con.commit()
+
+
 def remember_source(con, source_key: str, account_id: int):
     con.execute("""INSERT INTO account_sources(source_key, account_id) VALUES (?,?)
                    ON CONFLICT(source_key) DO UPDATE SET account_id=excluded.account_id""",
@@ -203,14 +304,198 @@ def tx_hash(account_id: int, date: str, amount: float, description: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+GAP_DAYS = 45   # longer than this without a single movement: a hole in the history, not a quiet month
+
+
+def _days_between(a: str, b: str) -> int:
+    return (date.fromisoformat(b) - date.fromisoformat(a)).days
+
+
+class Ledger:
+    """End-of-day balances of one account, aware of holes in its history.
+
+    Without a known balance the balance is the opening balance plus everything. With one, it
+    is that amount plus the later movements (minus the earlier ones going back) — across the
+    whole history, unless the history has a hole: no movement for more than GAP_DAYS, so the
+    statements of that time were never imported. Going back across such a hole would carry the
+    unknown sum of its movements into every older balance. So an older stretch that holds a
+    balance the bank stated (a balance check) and disagrees with the chain is anchored to its
+    own latest check instead; the chart breaks the line there and the hole is reported.
+    Only older stretches are anchored: the current balance always comes from the known
+    balance, and a stretch that agrees with the chain, or has no check, stays chained, so a
+    movement missing inside a complete stretch still shows as a difference.
+    """
+
+    def __init__(self, con, account_id: int):
+        a = con.execute("SELECT opening_balance, balance_date, balance_amount FROM accounts WHERE id=?",
+                        (account_id,)).fetchone()
+        rows = con.execute("""SELECT date, SUM(amount) FROM transactions WHERE account_id=?
+                              GROUP BY date ORDER BY date""", (account_id,)).fetchall()
+        self.dates = [r[0] for r in rows]
+        self.day_total = {r[0]: r[1] for r in rows}
+        self.cum, running = [], 0.0
+        for r in rows:
+            running += r[1]
+            self.cum.append(running)
+        self.gaps: list[dict] = []
+        if a["balance_date"] is None:
+            self.starts, self.anchors = [""], [("", a["opening_balance"])]
+            return
+        d = self.dates
+        # a stretch starts at the first movement and after every hole
+        self.starts = [d[0] if d else ""] + [d[i] for i in range(1, len(d)) if _days_between(d[i - 1], d[i]) > GAP_DAYS]
+        known = (a["balance_date"], a["balance_amount"])
+        self.anchors = [known] * len(self.starts)
+        latest = {}   # stretch -> its latest stated balance
+        for c in con.execute("SELECT date, amount FROM balance_checks WHERE account_id=? ORDER BY date",
+                             (account_id,)):
+            latest[self._stretch(c["date"])] = (c["date"], c["amount"])
+        for i in range(self._stretch(known[0]) - 1, -1, -1):
+            chained, check = self.anchors[i + 1], latest.get(i)
+            disagrees = check is not None and round(self._from(chained, check[0]) - check[1], 2) != 0
+            self.anchors[i] = check if disagrees else chained
+        self.gaps = [{"from": d[bisect_right(d, self.starts[i + 1]) - 2], "to": self.starts[i + 1]}
+                     for i in range(len(self.starts) - 1) if self.anchors[i] != self.anchors[i + 1]]
+
+    def _stretch(self, day: str) -> int:
+        """The stretch a day belongs to; a day inside a hole belongs to the one before it."""
+        return max(bisect_right(self.starts, day) - 1, 0)
+
+    def _upto(self, day: str) -> float:
+        i = bisect_right(self.dates, day)
+        return self.cum[i - 1] if i else 0.0
+
+    def _from(self, anchor: tuple[str, float], day: str) -> float:
+        anchor_day, amount = anchor
+        return amount + self._upto(day) - self._upto(anchor_day)   # forward or back from the anchor
+
+    def at(self, day: str) -> float:
+        """Computed balance at the end of a day."""
+        return round(self._from(self.anchors[self._stretch(day)], day), 2)
+
+    def in_gap(self, day: str) -> bool:
+        return any(g["from"] < day < g["to"] for g in self.gaps)
+
+
+def balance_at(con, account_id: int, day: str) -> float:
+    """Computed balance at the end of a day: from the known balance when there is one."""
+    return Ledger(con, account_id).at(day)
+
+
+def balance_gaps(con, account_id: int) -> list[dict]:
+    """Holes in the history across which older balances follow the bank's own (see Ledger)."""
+    return Ledger(con, account_id).gaps
+
+
+def balance_checks(con, account_id: int, limit: int = 10) -> list[dict]:
+    """The latest real balances of an account with the computed one next to them. Computed live,
+    so fixing a missing or doubled transaction shows at once."""
+    rows = [dict(r) for r in con.execute(
+        """SELECT id, date, amount, source, created_at FROM balance_checks
+           WHERE account_id=? ORDER BY date DESC LIMIT ?""", (account_id, limit))]
+    ledger = Ledger(con, account_id) if rows else None
+    for r in rows:
+        r["expected"] = ledger.at(r["date"])
+        r["difference"] = round(r["expected"] - r["amount"], 2)   # the app minus the bank
+    return rows
+
+
+def add_balance_check(con, account_id: int, day: str, amount: float, source: str = "manual") -> dict:
+    con.execute("""INSERT INTO balance_checks(account_id, date, amount, source) VALUES (?,?,?,?)
+                   ON CONFLICT(account_id, date) DO UPDATE SET amount=excluded.amount,
+                   source=excluded.source, created_at=datetime('now', 'localtime')""",
+                (account_id, day, amount, source))
+    con.commit()
+    return next(c for c in balance_checks(con, account_id, 1000) if c["date"] == day)
+
+
+def add_balance_checks(con, account_id: int, balances: dict[str, float], source: str) -> list[dict]:
+    """Several real balances at once (a statement with one per day), oldest first, each with the
+    computed balance and the difference."""
+    con.executemany("""INSERT INTO balance_checks(account_id, date, amount, source) VALUES (?,?,?,?)
+                       ON CONFLICT(account_id, date) DO UPDATE SET amount=excluded.amount,
+                       source=excluded.source, created_at=datetime('now', 'localtime')""",
+                    [(account_id, day, amount, source) for day, amount in balances.items()])
+    con.commit()
+    ledger, out = Ledger(con, account_id), []
+    for day, amount in sorted(balances.items()):
+        expected = ledger.at(day)
+        out.append({"date": day, "amount": amount, "expected": expected, "difference": round(expected - amount, 2)})
+    return out
+
+
+def running_balances(con, account_id: int) -> dict[int, float]:
+    """Balance after each transaction of an account (by date, then id). Within a day the bank
+    may order them differently; the balance at the end of the day is the same."""
+    ledger = Ledger(con, account_id)
+    out, day, running = {}, None, 0.0
+    for r in con.execute("SELECT id, date, amount FROM transactions WHERE account_id=? ORDER BY date, id",
+                         (account_id,)):
+        if r["date"] != day:   # start of the day = its end minus its movements
+            day = r["date"]
+            running = ledger.at(day) - ledger.day_total[day]
+        running += r["amount"]
+        out[r["id"]] = round(running, 2)
+    return out
+
+
+def balance_history(con, account_ids: list[int], date_from: str, date_to: str) -> dict:
+    """End-of-day balance of each account over a period, for a chart: a point on the first day
+    and on every day with movements (the balance holds until the next one), and the balance
+    checks of the period with the difference computed live. Nothing is drawn before an account
+    has data (its first movement or its known balance) — the bank exports only recent months,
+    so a line starting at zero would show a jump that never happened. A hole in the history
+    (see Ledger) breaks the line: a point without a balance where the next stretch starts. The
+    total starts once every account with data has started and is left out inside a hole."""
+    end = min(date_to, date.today().isoformat())
+    marks = ",".join("?" * len(account_ids))
+    accounts, ledgers = [], {}
+    rows = con.execute(f"""SELECT id, name, type, is_main, balance_date FROM accounts
+                           WHERE id IN ({marks}) ORDER BY name""", account_ids).fetchall()
+    for a in rows:
+        ledger = Ledger(con, a["id"])
+        item = {"id": a["id"], "name": a["name"], "type": a["type"], "is_main": a["is_main"],
+                "points": [], "checks": [], "gaps": []}
+        accounts.append(item)
+        starts = [x for x in (ledger.dates[0] if ledger.dates else None, a["balance_date"]) if x]
+        if not starts or max(date_from, min(starts)) > end:
+            continue
+        start = max(date_from, min(starts))
+        ledgers[a["id"]] = (start, ledger)
+        days = [start] + [d for d in ledger.dates if start < d <= end] + [end]
+        points = [{"date": d, "balance": None if ledger.in_gap(d) else ledger.at(d)} for d in dict.fromkeys(days)]
+        item["gaps"] = [g for g in ledger.gaps if g["to"] > start and g["from"] < end]
+        breaks = [{"date": g["to"], "balance": None} for g in item["gaps"] if start < g["to"] <= end]
+        item["points"] = sorted(points + breaks, key=lambda p: (p["date"], p["balance"] is not None))
+        item["checks"] = [{"date": c["date"], "amount": c["amount"],
+                           "difference": round(ledger.at(c["date"]) - c["amount"], 2)}
+                          for c in con.execute("""SELECT date, amount FROM balance_checks
+                                                  WHERE account_id=? AND date BETWEEN ? AND ? ORDER BY date""",
+                                               (a["id"], start, end))]
+    total = []
+    if ledgers:
+        begin = max(start for start, _ in ledgers.values())
+        days = sorted({p["date"] for a in accounts for p in a["points"] if p["date"] >= begin} | {begin})
+        total = [{"date": d, "balance": None if any(l.in_gap(d) for _, l in ledgers.values())
+                  else round(sum(l.at(d) for _, l in ledgers.values()), 2)} for d in days]
+    return {"from": date_from, "to": end, "accounts": accounts, "total": total}
+
+
 def account_balances(con) -> list[dict]:
+    """Balance and covered period of every account. With a known balance the history before
+    its date does not matter, so an incomplete or later completed history keeps it right."""
     rows = con.execute("""
-        SELECT a.id, a.name, a.type, a.currency,
-               a.opening_balance + COALESCE(SUM(t.amount), 0) AS balance
+        SELECT a.id, a.name, a.type, a.currency, a.is_main, a.balance_date, a.balance_amount,
+               ROUND(CASE WHEN a.balance_date IS NULL
+                          THEN a.opening_balance + COALESCE(SUM(t.amount), 0)
+                          ELSE a.balance_amount
+                               + COALESCE(SUM(CASE WHEN t.date > a.balance_date THEN t.amount END), 0)
+                     END, 2) AS balance,
+               MIN(t.date) AS first_date, MAX(t.date) AS last_date
         FROM accounts a LEFT JOIN transactions t ON t.account_id = a.id
         GROUP BY a.id ORDER BY a.name
     """).fetchall()
-    return [dict(r) for r in rows]
+    return [{**dict(r), "checks": balance_checks(con, r["id"])} for r in rows]
 
 
 def latest_asset_values(con) -> list[dict]:
