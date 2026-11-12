@@ -34,12 +34,14 @@
   .panel.collapsed .panel-head::before { transform:rotate(-90deg); }
   .panel.collapsed .panel-body { display:none; }
   .bal-chart { position:relative; height:340px; }
-  .chart-box { position:relative; height:300px; }   /* the same height at half or full width */
+  .chart-box { position:relative; height:300px; }
+  .fc-chart { position:relative; height:260px; margin:8px 0 16px; }
+  #recTable td small, #recOther td small { display:block; }   /* the same height at half or full width */
   @media (max-width:800px){ .row { grid-template-columns:1fr; } }
   table { width:100%; border-collapse:collapse; font-size:14px; }
   th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); }
   th { color:var(--muted); font-weight:500; }
-  td.num { text-align:right; white-space:nowrap; }
+  td.num, th.num { text-align:right; white-space:nowrap; }
   td.nowrap, th.nowrap { white-space:nowrap; }
   /* fixed column widths in Transactions so the layout doesn't jump with content */
   #txTable { table-layout:fixed; }
@@ -48,8 +50,13 @@
   #txTable col.c-amt { width:110px; }  #txTable col.c-del { width:44px; }
   #txTable td { overflow:hidden; text-overflow:ellipsis; }
   #txTable select { width:100%; }
+  #txTable .catcell { display:flex; gap:4px; align-items:center; }
+  #txTable col.c-sel { width:34px; }
+  .chip { display:inline-block; background:var(--bg); border:1px solid var(--border); border-radius:10px;
+          padding:0 7px; margin-right:4px; font-size:12px; cursor:pointer; }
+  #txTotal { margin:0 0 10px; } #txTotal b { color:var(--text); font-weight:600; }
   select, input, button.btn { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:14px; }
-  button.btn { cursor:pointer; } button.btn.primary { background:var(--accent); border-color:var(--accent); }
+  button.btn { cursor:pointer; } button.btn:disabled { opacity:.45; cursor:default; } button.btn.primary { background:var(--accent); border-color:var(--accent); }
   .toolbar { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
   .bar { background:var(--bg); border-radius:6px; height:8px; overflow:hidden; }
   .bar > div { height:100%; background:var(--green); }
@@ -83,6 +90,7 @@
     <button data-tab="overview" class="active" data-i18n="nav_overview"></button>
     <button data-tab="transactions" data-i18n="nav_transactions"></button>
     <button data-tab="budget" data-i18n="nav_budget"></button>
+    <button data-tab="plan" data-i18n="nav_plan"></button>
     <button data-tab="assets" data-i18n="nav_assets"></button>
     <button data-tab="import" data-i18n="nav_import"></button>
   </nav>
@@ -129,7 +137,8 @@
     <div class="card"><div class="label" data-i18n="expenses"></div><div class="value red" id="ovExpense">–</div></div>
     <div class="card hidden" id="ovTransfersCard"><div class="label" data-i18n="transfers_other"></div><div class="value" id="ovTransfers">–</div></div>
     <div class="card"><div class="label" data-i18n="month_balance"></div><div class="value" id="ovNet">–</div></div>
-    <div class="card"><div class="label" data-i18n="net_worth"></div><div class="value" id="ovNW">–</div></div>
+    <div class="card"><div class="label" data-i18n="net_worth"></div><div class="value" id="ovNW">–</div>
+      <div class="hint warn" id="ovNWHint"></div></div>
   </div>
   <div class="panels">
     <div class="card panel" data-panel="categories"><h2 class="panel-head" onclick="collapsePanel(this)"><span data-i18n="expenses_by_cat"></span></h2>
@@ -152,15 +161,26 @@
     <select id="txAccount"></select>
     <input type="search" id="txSearch" data-i18n-ph="search_ph">
     <label><input type="checkbox" id="txUncat"> <span data-i18n="only_uncat"></span></label>
+    <label><input type="checkbox" id="txAi"> 🤖 <span data-i18n="only_ai"></span></label>
+    <select id="txTag"></select>
+    <button class="btn hidden" id="txTagEdit" onclick="renameTag()" data-i18n-title="tag_rename">✎</button>
+    <button class="btn hidden" id="txTagDel" onclick="deleteTag()" data-i18n-title="tag_delete">✕</button>
     <button class="btn" onclick="recat()">🤖 <span data-i18n="recat_btn"></span></button>
     <span id="recatMsg" class="hint"></span>
   </div>
+  <div class="hint" id="txTotal"></div>
+  <div class="toolbar" id="txTagBar">
+    <span class="hint" id="txSelCount"></span>
+    <input id="txTagName" list="tagList" data-i18n-ph="tag_ph" style="width:240px"><datalist id="tagList"></datalist>
+    <button class="btn primary" id="txTagAdd" onclick="tagSelected(true)">🏷 <span data-i18n="tag_add"></span></button>
+    <button class="btn" id="txTagRemove" onclick="tagSelected(false)" data-i18n="tag_remove"></button>
+  </div>
   <div class="card"><table id="txTable">
     <colgroup>
-      <col class="c-date"><col class="c-acct"><col><col class="c-cparty">
+      <col class="c-sel"><col class="c-date"><col class="c-acct"><col><col class="c-cparty">
       <col class="c-cat"><col class="c-amt"><col class="c-del">
     </colgroup>
-    <thead><tr><th data-i18n="col_date"></th><th data-i18n="col_account"></th><th data-i18n="col_desc"></th><th data-i18n="col_cparty"></th><th data-i18n="col_cat"></th><th class="num" id="txAmountHead" data-i18n="col_amount"></th><th></th></tr></thead>
+    <thead><tr><th><input type="checkbox" id="txSelAll" onchange="selectAllTx(this.checked)"></th><th data-i18n="col_date"></th><th data-i18n="col_account"></th><th data-i18n="col_desc"></th><th data-i18n="col_cparty"></th><th data-i18n="col_cat"></th><th class="num" id="txAmountHead" data-i18n="col_amount"></th><th></th></tr></thead>
     <tbody></tbody></table></div>
 </section>
 
@@ -176,9 +196,58 @@
     <tbody></tbody></table></div>
 </section>
 
+<section id="tab-plan" class="hidden">
+  <div class="cards">
+    <div class="card"><div class="label" data-i18n="fixed_monthly"></div><div class="value red" id="plFixedM">–</div></div>
+    <div class="card"><div class="label" data-i18n="fixed_quarterly"></div><div class="value" id="plFixedQ">–</div></div>
+    <div class="card"><div class="label" data-i18n="fixed_yearly"></div><div class="value" id="plFixedY">–</div></div>
+    <div class="card"><div class="label" data-i18n="regular_income"></div><div class="value green" id="plIncomeM">–</div></div>
+  </div>
+  <div class="card">
+    <h2 data-i18n="recurring_title"></h2>
+    <p class="hint" data-i18n="recurring_hint"></p>
+    <div class="scroll-x"><table id="recTable">
+      <thead><tr><th data-i18n="col_cparty"></th><th data-i18n="col_cat"></th><th data-i18n="col_period"></th>
+        <th class="num" data-i18n="col_amount"></th><th class="num" data-i18n="col_monthly"></th>
+        <th class="nowrap" data-i18n="col_last"></th><th class="nowrap" data-i18n="col_next"></th><th></th></tr></thead>
+      <tbody></tbody></table></div>
+    <p class="hint hidden" id="recNone" data-i18n="rec_none"></p>
+    <details id="recMore" class="hidden"><summary class="hint" id="recMoreSum"></summary>
+      <div class="scroll-x"><table id="recOther"><tbody></tbody></table></div></details>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h2 data-i18n="forecast_title"></h2>
+    <p class="hint" id="fcHint"></p>
+    <div class="toolbar">
+      <label><span data-i18n="floor_label"></span> <input type="number" id="fcFloor" value="0" step="100" style="width:120px"></label>
+    </div>
+    <div class="cards">
+      <div class="card"><div class="label" data-i18n="fc_min_income"></div><div class="value" id="fcMin">–</div><div class="hint" id="fcMinHint"></div></div>
+      <div class="card"><div class="label" data-i18n="fc_cover"></div><div class="value" id="fcCover">–</div><div class="hint" data-i18n="fc_cover_hint"></div></div>
+      <div class="card"><div class="label" data-i18n="fc_expenses"></div><div class="value red" id="fcExp">–</div><div class="hint" id="fcExpHint"></div></div>
+      <div class="card"><div class="label" data-i18n="fc_regular"></div><div class="value green" id="fcReg">–</div><div class="hint" id="fcRegHint"></div></div>
+    </div>
+    <div class="fc-chart"><canvas id="fcChart"></canvas></div>
+    <div class="scroll-x"><table id="fcTable">
+      <thead><tr><th data-i18n="fc_col_month"></th><th class="num" data-i18n="fc_col_fixed"></th><th class="num" data-i18n="fc_col_variable"></th>
+        <th class="num" data-i18n="fc_col_planned"></th><th class="num" data-i18n="fc_col_expenses"></th><th class="num" data-i18n="fc_col_income"></th>
+        <th class="num" data-i18n="fc_col_bal_regular"></th><th class="num" data-i18n="fc_col_bal_min"></th></tr></thead>
+      <tbody></tbody></table></div>
+    <h2 style="margin-top:18px" data-i18n="plans_title"></h2>
+    <table id="planTable"><tbody></tbody></table>
+    <div class="toolbar" style="margin-top:10px">
+      <input id="planName" data-i18n-ph="plan_name_ph">
+      <select id="planMonth"></select>
+      <input type="number" id="planAmount" step="10" min="0" data-i18n-ph="plan_amount_ph" style="width:130px">
+      <button class="btn" onclick="addPlan()" data-i18n="plan_add"></button>
+    </div>
+  </div>
+</section>
+
 <section id="tab-assets" class="hidden">
   <div class="cards">
-    <div class="card"><div class="label" data-i18n="accounts_total"></div><div class="value" id="nwAccounts">–</div></div>
+    <div class="card"><div class="label" data-i18n="accounts_total"></div><div class="value" id="nwAccounts">–</div>
+      <div class="hint warn" id="nwAccountsHint"></div></div>
     <div class="card"><div class="label" data-i18n="assets_liabilities"></div><div class="value" id="nwAssets">–</div></div>
     <div class="card"><div class="label" data-i18n="net_worth"></div><div class="value" id="nwTotal">–</div></div>
   </div>
@@ -286,7 +355,8 @@ sk: {
   expenses_by_cat:'Výdavky podľa kategórií', monthly_trend:'Vývoj po mesiacoch',
   p_this_month:'Tento mesiac', p_last_month:'Minulý mesiac', p_this_year:'Tento rok',
   p_last_year:'Minulý rok', p_all:'Všetko', p_custom:'Vlastné obdobie',
-  search_ph:'Hľadať…', only_uncat:'len nezaradené', recat_btn:'Dokategorizovať',
+  search_ph:'Hľadať…', only_uncat:'len nezaradené', only_ai:'len od AI', ai_mark:'Kategóriu odhadla AI — over ju',
+  apply_similar:(n, who)=>`Zmeniť kategóriu aj ďalším ${n} pohybom „${who}“? Tvoje vlastné zaradenia ostanú.`, recat_btn:'Dokategorizovať',
   recat_working:'Gemma pracuje… (max 200 naraz, priebeh v termináli)',
   recat_done:(n,r)=>`Zaradených ${n}, zostáva nezaradených ${r}.`,
   col_date:'Dátum', col_account:'Účet', all_accounts:'Všetky účty', all_years:'Všetky roky', whole_year:'Celý rok', col_desc:'Popis', col_cparty:'Protistrana', col_cat:'Kategória', col_amount:'Suma',
@@ -330,7 +400,7 @@ sk: {
   imp_need_account:'vyber účet',
   imp_running:'importujem…',
   imp_balance:b=>[b.known && `⚖ zostatok ${fmt(b.amount)} k ${b.date} prevzatý z výpisu`, b.off ? `⚠ zostatok nesedí v ${b.off} z ${b.days} dní (prvý ${b.first_off}: rozdiel ${fmt(b.first_difference)})` : b.days > 1 ? `✓ zostatok sedí vo všetkých ${b.days} dňoch` : b.days ? `✓ zostatok k ${b.date} sedí` : '', ...(b.gaps || []).map(g => `↔ medzera v dátach ${g.from} – ${g.to}: zostatky pred ňou podľa banky`)].filter(Boolean).join(' · '),
-  imp_row_done:r=>[`✓ ${r.inserted} nových`, r.skipped_duplicates && `${r.skipped_duplicates} už bolo`, r.linked_transfers && `🔗 ${r.linked_transfers} PayPal prevodov`, r.possible_duplicates && `⚠ ${r.possible_duplicates} možných duplicít`, r.voided && `✕ ${r.voided} zrušených (platba neprešla)`, r.no_amount && t('imp_no_amount')(r.no_amount), r.balance && t('imp_balance')(r.balance)].filter(Boolean).join(' · '),
+  imp_row_done:r=>[`✓ ${r.inserted} nových`, r.skipped_duplicates && `${r.skipped_duplicates} už bolo`, r.linked_transfers && `🔗 ${r.linked_transfers} prevodov medzi účtami`, r.possible_duplicates && `⚠ ${r.possible_duplicates} možných duplicít`, r.voided && `✕ ${r.voided} zrušených (platba neprešla)`, r.no_amount && t('imp_no_amount')(r.no_amount), r.balance && t('imp_balance')(r.balance)].filter(Boolean).join(' · '),
   imp_folder:'Priečinok s výpismi:', imp_folder_ph:'napr. C:\\Users\\…\\Vypisy', imp_folder_save:'Uložiť',
   imp_rescan:'↻ Načítať znova', imp_or_pick:'alebo vyber súbory ručne:',
   imp_no_folder:'Nastav priečinok s výpismi — appka ho pri otvorení tejto záložky prezrie sama. Importuje sa až po stlačení GO.',
@@ -360,6 +430,39 @@ sk: {
   bal_prompt_amount:n=>`Skutočný zostatok účtu „${n}“ na konci dňa (napr. 1.234,56; prázdne = zrušiť):`,
   bal_prompt_date:'K dátumu (RRRR-MM-DD alebo DD.MM.RRRR):', bal_bad_amount:'Neplatná suma.',
   err_invalid_date:'Neplatný dátum',
+  card_plus:'⚠ kladný zostatok karty — zadaj skutočný ✎',
+  card_plus_title:'Kreditná karta s kladným zostatkom: výpis takmer vždy začína splátkou za staršie nákupy, ktoré v ňom nie sú. Zadaj skutočný zostatok (✎).',
+  nw_unverified:list=>`⚠ neoverené zostatky (zadaj ich ✎ na karte Import): ${list}`,
+  tag_ph:'Štítok, napr. Sardínia 2025', tag_add:'Pridať štítok', tag_remove:'Odobrať štítok', tag_all:'Všetky štítky',
+  tag_selected:n=>`${n} vybraných`, tag_how:'Štítok (napr. dovolenka): zaškrtni pohyby vľavo ☑ →', tag_rename:'Premenovať štítok', tag_delete:'Zmazať štítok',
+  tag_rename_prompt:'Nový názov štítka:', tag_delete_confirm:name=>`Zmazať štítok „${name}“? Pohyby ostanú, len stratia tento štítok.`,
+  tx_total:(n, exp, inc, net)=>`${n} pohybov · výdavky ${exp} · príjmy ${inc} · spolu ${net}`,
+  tx_shown:n=>`zobrazených ${n}`, tx_transfers:v=>`prevody ${v} (nepočítajú sa)`,
+  err_tag_required:'Zadaj názov štítka', err_tag_exists:'Štítok s týmto názvom už existuje',
+  nav_plan:'Plán',
+  fixed_monthly:'Fixné výdavky / mesiac', fixed_quarterly:'Fixné výdavky / štvrťrok', fixed_yearly:'Fixné výdavky / rok',
+  regular_income:'Pravidelný príjem / mesiac',
+  recurring_title:'Pravidelné platby',
+  recurring_hint:'Nájdené v tvojich transakciách: rovnaká protistrana v pravidelnom intervale (mesačne, štvrťročne, polročne, ročne). Prevody medzi účtami sa nepočítajú. Platbu, ktorá nie je pravidelná, skry ✕ — potom sa počíta medzi bežné výdavky.',
+  col_period:'Interval', col_monthly:'Mesačne', col_last:'Naposledy', col_next:'Ďalšia',
+  per_monthly:'mesačne', per_quarterly:'štvrťročne', per_half_yearly:'polročne', per_yearly:'ročne',
+  rec_changed:v=>`predtým ${v}`, rec_variable:'premenlivá suma — priemer', rec_more:n=>`Ukončené a skryté (${n})`,
+  rec_ended:'ukončená', rec_ignored:'skrytá', rec_restore:'Vrátiť medzi pravidelné', rec_ignore:'Nie je pravidelná',
+  rec_none:'Zatiaľ sa nenašli žiadne pravidelné platby — treba aspoň pár mesiacov histórie.',
+  forecast_title:'Výhľad na 12 mesiacov',
+  forecast_hint:(from, to, bal)=>`${from} – ${to}. Začína dnešným zostatkom ${bal} (všetky účty okrem investičných). Výdavky = pravidelné platby v ich termínoch + bežné výdavky (priemerný mesiac) + plánované. Odhad z tvojich dát, nie finančné poradenstvo.`,
+  floor_label:'Minimálny zostatok',
+  fc_min_income:'Minimálny príjem / mesiac', fc_min_hint:(floor, m)=>`aby zostatok neklesol pod ${floor}` + (m ? `; najtesnejšie ${m}` : ''),
+  fc_cover:'Príjem bez čerpania úspor', fc_cover_hint:'pokryje výdavky každého mesiaca, dnešný zostatok ostane',
+  fc_expenses:'Výdavky / mesiac (priemer)',
+  fc_expenses_hint:(f, v, n, from, to)=>`fixné ${f} + bežné ${v} (priemer ${n} mes., ${from} – ${to})`,
+  fc_no_basis:'Na bežné výdavky treba aspoň jeden úplný mesiac dát.',
+  fc_regular:'Pravidelný príjem dnes', fc_surplus:v=>v >= 0 ? `prebytok ${fmt(v)} / mesiac` : `chýba ${fmt(-v)} / mesiac`,
+  fc_col_month:'Mesiac', fc_col_fixed:'Fixné', fc_col_variable:'Bežné', fc_col_planned:'Plánované', fc_col_expenses:'Výdavky',
+  fc_col_income:'Pravidelný príjem', fc_col_bal_regular:'Zostatok (pravidelný príjem)', fc_col_bal_min:'Zostatok (minimálny príjem)',
+  fc_chart_regular:'zostatok s dnešným pravidelným príjmom', fc_chart_min:'zostatok s minimálnym príjmom',
+  plans_title:'Plánované výdavky', plan_name_ph:'napr. Dovolenka', plan_amount_ph:'Suma €', plan_add:'Pridať',
+  plans_none:'Žiadne — pridaj dovolenku, auto, …', err_invalid_plan:'Neplatný plán (mesiac alebo suma)',
   err_name_required:'Zadaj názov účtu', err_name_taken:'Účet s týmto názvom už existuje',
   cov_late:l=>`⚠ Na začiatku obdobia chýbajú dáta: ${l}`, cov_from:(n, d)=>`${n} až od ${d}`, cov_none:n=>`${n} žiadne`,
   check_title:'Kontrola: zadať skutočný zostatok z banky a porovnať ho s appkou',
@@ -376,7 +479,7 @@ sk: {
   cat_car:'Auto', cat_restaurants:'Reštaurácie', cat_health:'Zdravie', cat_clothing:'Oblečenie',
   cat_entertainment:'Zábava', cat_travel:'Cestovanie', cat_education:'Vzdelávanie',
   cat_children:'Deti', cat_household:'Domácnosť', cat_insurance:'Poistenie', cat_fees:'Poplatky',
-  cat_gifts:'Darčeky', cat_sport:'Šport', cat_subscriptions:'Predplatné',
+  cat_gifts:'Darčeky', cat_sport:'Šport', cat_subscriptions:'Predplatné', cat_internet_phone:'Internet a telefón', cat_donations:'Dary',
   cat_savings_investments:'Sporenie a investície', cat_other_expenses:'Iné výdavky',
   cat_salary:'Mzda', cat_business:'Podnikanie', cat_investment_income:'Investičný výnos',
   cat_other_income:'Iné príjmy', cat_transfer:'Prevod medzi účtami',
@@ -388,7 +491,8 @@ de: {
   expenses_by_cat:'Ausgaben nach Kategorien', monthly_trend:'Monatsverlauf',
   p_this_month:'Dieser Monat', p_last_month:'Letzter Monat', p_this_year:'Dieses Jahr',
   p_last_year:'Letztes Jahr', p_all:'Alles', p_custom:'Eigener Zeitraum',
-  search_ph:'Suchen…', only_uncat:'nur ohne Kategorie', recat_btn:'Nachkategorisieren',
+  search_ph:'Suchen…', only_uncat:'nur ohne Kategorie', only_ai:'nur von der KI', ai_mark:'Kategorie von der KI geschätzt — bitte prüfen',
+  apply_similar:(n, who)=>`Auch die übrigen ${n} Umsätze „${who}“ ändern? Deine eigenen Zuordnungen bleiben.`, recat_btn:'Nachkategorisieren',
   recat_working:'Gemma arbeitet… (max. 200 auf einmal, Fortschritt im Terminal)',
   recat_done:(n,r)=>`${n} zugeordnet, ${r} verbleiben ohne Kategorie.`,
   col_date:'Datum', col_account:'Konto', all_accounts:'Alle Konten', all_years:'Alle Jahre', whole_year:'Ganzes Jahr', col_desc:'Verwendungszweck', col_cparty:'Beteiligter', col_cat:'Kategorie', col_amount:'Betrag',
@@ -432,7 +536,7 @@ de: {
   imp_need_account:'Konto wählen',
   imp_running:'importiere…',
   imp_balance:b=>[b.known && `⚖ Saldo ${fmt(b.amount)} zum ${b.date} aus dem Auszug übernommen`, b.off ? `⚠ Saldo stimmt an ${b.off} von ${b.days} Tagen nicht (zuerst ${b.first_off}: Differenz ${fmt(b.first_difference)})` : b.days > 1 ? `✓ Saldo stimmt an allen ${b.days} Tagen` : b.days ? `✓ Saldo zum ${b.date} stimmt` : '', ...(b.gaps || []).map(g => `↔ Datenlücke ${g.from} – ${g.to}: Salden davor laut Bank`)].filter(Boolean).join(' · '),
-  imp_row_done:r=>[`✓ ${r.inserted} neu`, r.skipped_duplicates && `${r.skipped_duplicates} schon vorhanden`, r.linked_transfers && `🔗 ${r.linked_transfers} PayPal-Umbuchungen`, r.possible_duplicates && `⚠ ${r.possible_duplicates} mögliche Duplikate`, r.voided && `✕ ${r.voided} storniert (Zahlung fehlgeschlagen)`, r.no_amount && t('imp_no_amount')(r.no_amount), r.balance && t('imp_balance')(r.balance)].filter(Boolean).join(' · '),
+  imp_row_done:r=>[`✓ ${r.inserted} neu`, r.skipped_duplicates && `${r.skipped_duplicates} schon vorhanden`, r.linked_transfers && `🔗 ${r.linked_transfers} Umbuchungen zwischen Konten`, r.possible_duplicates && `⚠ ${r.possible_duplicates} mögliche Duplikate`, r.voided && `✕ ${r.voided} storniert (Zahlung fehlgeschlagen)`, r.no_amount && t('imp_no_amount')(r.no_amount), r.balance && t('imp_balance')(r.balance)].filter(Boolean).join(' · '),
   imp_folder:'Ordner mit Auszügen:', imp_folder_ph:'z. B. C:\\Users\\…\\Auszuege', imp_folder_save:'Speichern',
   imp_rescan:'↻ Neu einlesen', imp_or_pick:'oder Dateien selbst wählen:',
   imp_no_folder:'Lege den Ordner mit den Auszügen fest — die App sieht ihn beim Öffnen dieses Tabs selbst durch. Importiert wird erst nach GO.',
@@ -462,6 +566,39 @@ de: {
   bal_prompt_amount:n=>`Tatsächlicher Saldo von „${n}“ am Ende des Tages (z. B. 1.234,56; leer = entfernen):`,
   bal_prompt_date:'Zum Datum (JJJJ-MM-TT oder TT.MM.JJJJ):', bal_bad_amount:'Ungültiger Betrag.',
   err_invalid_date:'Ungültiges Datum',
+  card_plus:'⚠ Kreditkarte im Plus — echten Saldo eingeben ✎',
+  card_plus_title:'Kreditkarte im Plus: der Auszug beginnt fast immer mit einer Rückzahlung für ältere Umsätze, die er nicht enthält. Echten Saldo eingeben (✎).',
+  nw_unverified:list=>`⚠ nicht bestätigte Salden (mit ✎ im Tab Import eingeben): ${list}`,
+  tag_ph:'Schlagwort, z. B. Sardinien 2025', tag_add:'Schlagwort setzen', tag_remove:'Schlagwort entfernen', tag_all:'Alle Schlagwörter',
+  tag_selected:n=>`${n} ausgewählt`, tag_how:'Schlagwort (z. B. Urlaub): Umsätze links ankreuzen ☑ →', tag_rename:'Schlagwort umbenennen', tag_delete:'Schlagwort löschen',
+  tag_rename_prompt:'Neuer Name des Schlagworts:', tag_delete_confirm:name=>`Schlagwort „${name}“ löschen? Die Umsätze bleiben, sie verlieren nur das Schlagwort.`,
+  tx_total:(n, exp, inc, net)=>`${n} Umsätze · Ausgaben ${exp} · Einnahmen ${inc} · gesamt ${net}`,
+  tx_shown:n=>`${n} angezeigt`, tx_transfers:v=>`Umbuchungen ${v} (zählen nicht)`,
+  err_tag_required:'Bitte einen Namen für das Schlagwort eingeben', err_tag_exists:'Ein Schlagwort mit diesem Namen gibt es schon',
+  nav_plan:'Planung',
+  fixed_monthly:'Fixkosten / Monat', fixed_quarterly:'Fixkosten / Quartal', fixed_yearly:'Fixkosten / Jahr',
+  regular_income:'Regelmäßiges Einkommen / Monat',
+  recurring_title:'Regelmäßige Zahlungen',
+  recurring_hint:'Gefunden in deinen Umsätzen: derselbe Beteiligte in regelmäßigem Abstand (monatlich, vierteljährlich, halbjährlich, jährlich). Umbuchungen zählen nicht. Eine Zahlung, die nicht regelmäßig ist, mit ✕ ausblenden — sie zählt dann zu den laufenden Ausgaben.',
+  col_period:'Intervall', col_monthly:'Monatlich', col_last:'Zuletzt', col_next:'Nächste',
+  per_monthly:'monatlich', per_quarterly:'vierteljährlich', per_half_yearly:'halbjährlich', per_yearly:'jährlich',
+  rec_changed:v=>`vorher ${v}`, rec_variable:'schwankender Betrag — Durchschnitt', rec_more:n=>`Beendet und ausgeblendet (${n})`,
+  rec_ended:'beendet', rec_ignored:'ausgeblendet', rec_restore:'Wieder als regelmäßig zählen', rec_ignore:'Nicht regelmäßig',
+  rec_none:'Noch keine regelmäßigen Zahlungen gefunden — dafür braucht es einige Monate Verlauf.',
+  forecast_title:'Ausblick auf 12 Monate',
+  forecast_hint:(from, to, bal)=>`${from} – ${to}. Beginnt mit dem heutigen Saldo ${bal} (alle Konten außer Anlagekonten). Ausgaben = regelmäßige Zahlungen zu ihren Terminen + laufende Ausgaben (Durchschnittsmonat) + geplante. Eine Schätzung aus deinen Daten, keine Finanzberatung.`,
+  floor_label:'Mindestsaldo',
+  fc_min_income:'Mindesteinkommen / Monat', fc_min_hint:(floor, m)=>`damit der Saldo nicht unter ${floor} fällt` + (m ? `; am knappsten ${m}` : ''),
+  fc_cover:'Einkommen ohne Ersparnisse anzugreifen', fc_cover_hint:'deckt die Ausgaben jedes Monats, der heutige Saldo bleibt',
+  fc_expenses:'Ausgaben / Monat (Durchschnitt)',
+  fc_expenses_hint:(f, v, n, from, to)=>`fix ${f} + laufend ${v} (Durchschnitt ${n} Mon., ${from} – ${to})`,
+  fc_no_basis:'Für die laufenden Ausgaben braucht es mindestens einen vollständigen Monat Daten.',
+  fc_regular:'Regelmäßiges Einkommen heute', fc_surplus:v=>v >= 0 ? `Überschuss ${fmt(v)} / Monat` : `es fehlen ${fmt(-v)} / Monat`,
+  fc_col_month:'Monat', fc_col_fixed:'Fix', fc_col_variable:'Laufend', fc_col_planned:'Geplant', fc_col_expenses:'Ausgaben',
+  fc_col_income:'Regelm. Einkommen', fc_col_bal_regular:'Saldo (regelm. Einkommen)', fc_col_bal_min:'Saldo (Mindesteinkommen)',
+  fc_chart_regular:'Saldo mit dem heutigen regelmäßigen Einkommen', fc_chart_min:'Saldo mit dem Mindesteinkommen',
+  plans_title:'Geplante Ausgaben', plan_name_ph:'z. B. Urlaub', plan_amount_ph:'Betrag €', plan_add:'Hinzufügen',
+  plans_none:'Keine — füge Urlaub, Auto, … hinzu', err_invalid_plan:'Ungültiger Plan (Monat oder Betrag)',
   err_name_required:'Gib einen Kontonamen ein', err_name_taken:'Ein Konto mit diesem Namen gibt es schon',
   cov_late:l=>`⚠ Am Anfang des Zeitraums fehlen Daten: ${l}`, cov_from:(n, d)=>`${n} erst ab ${d}`, cov_none:n=>`${n} keine`,
   check_title:'Kontrolle: tatsächlichen Saldo der Bank eingeben und mit der App vergleichen',
@@ -479,7 +616,7 @@ de: {
   cat_clothing:'Kleidung', cat_entertainment:'Freizeit', cat_travel:'Reisen',
   cat_education:'Bildung', cat_children:'Kinder', cat_household:'Haushalt',
   cat_insurance:'Versicherungen', cat_fees:'Gebühren', cat_gifts:'Geschenke', cat_sport:'Sport',
-  cat_subscriptions:'Abonnements', cat_savings_investments:'Sparen und Investieren',
+  cat_subscriptions:'Abonnements', cat_internet_phone:'Internet und Telefon', cat_donations:'Spenden', cat_savings_investments:'Sparen und Investieren',
   cat_other_expenses:'Sonstige Ausgaben', cat_salary:'Gehalt', cat_business:'Selbstständigkeit',
   cat_investment_income:'Kapitalerträge', cat_other_income:'Sonstige Einnahmen',
   cat_transfer:'Umbuchung zwischen Konten',
@@ -491,7 +628,8 @@ en: {
   expenses_by_cat:'Expenses by category', monthly_trend:'Monthly trend',
   p_this_month:'This month', p_last_month:'Last month', p_this_year:'This year',
   p_last_year:'Last year', p_all:'All time', p_custom:'Custom range',
-  search_ph:'Search…', only_uncat:'uncategorized only', recat_btn:'Recategorize',
+  search_ph:'Search…', only_uncat:'uncategorized only', only_ai:'AI only', ai_mark:'Category guessed by the AI — check it',
+  apply_similar:(n, who)=>`Change the category of the other ${n} movements of "${who}" too? Your own choices stay.`, recat_btn:'Recategorize',
   recat_working:'Gemma is working… (max 200 at once, progress in terminal)',
   recat_done:(n,r)=>`${n} categorized, ${r} remaining uncategorized.`,
   col_date:'Date', col_account:'Account', all_accounts:'All accounts', all_years:'All years', whole_year:'Whole year', col_desc:'Description', col_cparty:'Counterparty', col_cat:'Category', col_amount:'Amount',
@@ -535,7 +673,7 @@ en: {
   imp_need_account:'choose an account',
   imp_running:'importing…',
   imp_balance:b=>[b.known && `⚖ balance ${fmt(b.amount)} on ${b.date} taken from the statement`, b.off ? `⚠ balance off on ${b.off} of ${b.days} days (first ${b.first_off}: by ${fmt(b.first_difference)})` : b.days > 1 ? `✓ balance matches on all ${b.days} days` : b.days ? `✓ balance on ${b.date} matches` : '', ...(b.gaps || []).map(g => `↔ gap in the data ${g.from} – ${g.to}: balances before it follow the bank`)].filter(Boolean).join(' · '),
-  imp_row_done:r=>[`✓ ${r.inserted} new`, r.skipped_duplicates && `${r.skipped_duplicates} already there`, r.linked_transfers && `🔗 ${r.linked_transfers} PayPal transfers`, r.possible_duplicates && `⚠ ${r.possible_duplicates} possible duplicates`, r.voided && `✕ ${r.voided} voided (payment failed)`, r.no_amount && t('imp_no_amount')(r.no_amount), r.balance && t('imp_balance')(r.balance)].filter(Boolean).join(' · '),
+  imp_row_done:r=>[`✓ ${r.inserted} new`, r.skipped_duplicates && `${r.skipped_duplicates} already there`, r.linked_transfers && `🔗 ${r.linked_transfers} transfers between accounts`, r.possible_duplicates && `⚠ ${r.possible_duplicates} possible duplicates`, r.voided && `✕ ${r.voided} voided (payment failed)`, r.no_amount && t('imp_no_amount')(r.no_amount), r.balance && t('imp_balance')(r.balance)].filter(Boolean).join(' · '),
   imp_folder:'Statements folder:', imp_folder_ph:'e.g. C:\\Users\\…\\Statements', imp_folder_save:'Save',
   imp_rescan:'↻ Rescan', imp_or_pick:'or pick files yourself:',
   imp_no_folder:'Set the folder with your statements — the app looks through it whenever this tab opens. Nothing is imported until you press GO.',
@@ -565,6 +703,39 @@ en: {
   bal_prompt_amount:n=>`Real balance of "${n}" at the end of the day (e.g. 1,234.56; empty = remove):`,
   bal_prompt_date:'On the date (YYYY-MM-DD or DD.MM.YYYY):', bal_bad_amount:'Invalid amount.',
   err_invalid_date:'Invalid date',
+  card_plus:'⚠ credit card in credit — enter the real balance ✎',
+  card_plus_title:'A credit card in credit: the statement nearly always starts with a repayment for older purchases it does not hold. Enter the real balance (✎).',
+  nw_unverified:list=>`⚠ unconfirmed balances (enter them with ✎ on the Import tab): ${list}`,
+  tag_ph:'Tag, e.g. Sardinia 2025', tag_add:'Add tag', tag_remove:'Remove tag', tag_all:'All tags',
+  tag_selected:n=>`${n} selected`, tag_how:'Tag (e.g. a trip): tick movements on the left ☑ →', tag_rename:'Rename tag', tag_delete:'Delete tag',
+  tag_rename_prompt:'New name of the tag:', tag_delete_confirm:name=>`Delete the tag "${name}"? The movements stay, they only lose the tag.`,
+  tx_total:(n, exp, inc, net)=>`${n} movements · expenses ${exp} · income ${inc} · total ${net}`,
+  tx_shown:n=>`${n} shown`, tx_transfers:v=>`transfers ${v} (not counted)`,
+  err_tag_required:'Enter a name for the tag', err_tag_exists:'A tag with this name exists already',
+  nav_plan:'Plan',
+  fixed_monthly:'Fixed costs / month', fixed_quarterly:'Fixed costs / quarter', fixed_yearly:'Fixed costs / year',
+  regular_income:'Regular income / month',
+  recurring_title:'Recurring payments',
+  recurring_hint:'Found in your transactions: the same counterparty at a regular interval (monthly, quarterly, half-yearly, yearly). Transfers between accounts do not count. Hide a payment that is not regular with ✕ — it then counts as everyday spending.',
+  col_period:'Interval', col_monthly:'Monthly', col_last:'Last', col_next:'Next',
+  per_monthly:'monthly', per_quarterly:'quarterly', per_half_yearly:'half-yearly', per_yearly:'yearly',
+  rec_changed:v=>`before ${v}`, rec_variable:'varying amount — average', rec_more:n=>`Ended and hidden (${n})`,
+  rec_ended:'ended', rec_ignored:'hidden', rec_restore:'Count as recurring again', rec_ignore:'Not recurring',
+  rec_none:'No recurring payments found yet — it takes a few months of history.',
+  forecast_title:'Outlook for 12 months',
+  forecast_hint:(from, to, bal)=>`${from} – ${to}. Starts with today's balance ${bal} (all accounts except investment ones). Expenses = recurring payments on their dates + everyday spending (the average month) + planned ones. An estimate from your data, not financial advice.`,
+  floor_label:'Minimum balance',
+  fc_min_income:'Minimum income / month', fc_min_hint:(floor, m)=>`so the balance stays above ${floor}` + (m ? `; tightest in ${m}` : ''),
+  fc_cover:'Income without using savings', fc_cover_hint:'covers every month\'s expenses, today\'s balance stays',
+  fc_expenses:'Expenses / month (average)',
+  fc_expenses_hint:(f, v, n, from, to)=>`fixed ${f} + everyday ${v} (average of ${n} months, ${from} – ${to})`,
+  fc_no_basis:'Everyday spending needs at least one complete month of data.',
+  fc_regular:'Regular income today', fc_surplus:v=>v >= 0 ? `surplus ${fmt(v)} / month` : `short by ${fmt(-v)} / month`,
+  fc_col_month:'Month', fc_col_fixed:'Fixed', fc_col_variable:'Everyday', fc_col_planned:'Planned', fc_col_expenses:'Expenses',
+  fc_col_income:'Regular income', fc_col_bal_regular:'Balance (regular income)', fc_col_bal_min:'Balance (minimum income)',
+  fc_chart_regular:'balance with today\'s regular income', fc_chart_min:'balance with the minimum income',
+  plans_title:'Planned expenses', plan_name_ph:'e.g. Holiday', plan_amount_ph:'Amount €', plan_add:'Add',
+  plans_none:'None — add a holiday, a car, …', err_invalid_plan:'Invalid plan (month or amount)',
   err_name_required:'Enter a name for the account', err_name_taken:'An account with this name already exists',
   cov_late:l=>`⚠ Data missing at the start of the period: ${l}`, cov_from:(n, d)=>`${n} only from ${d}`, cov_none:n=>`${n} none`,
   check_title:'Check: enter the real balance from the bank and compare it with the app',
@@ -581,7 +752,7 @@ en: {
   cat_car:'Car', cat_restaurants:'Restaurants', cat_health:'Health', cat_clothing:'Clothing',
   cat_entertainment:'Entertainment', cat_travel:'Travel', cat_education:'Education',
   cat_children:'Children', cat_household:'Household', cat_insurance:'Insurance', cat_fees:'Fees',
-  cat_gifts:'Gifts', cat_sport:'Sport', cat_subscriptions:'Subscriptions',
+  cat_gifts:'Gifts', cat_sport:'Sport', cat_subscriptions:'Subscriptions', cat_internet_phone:'Internet and phone', cat_donations:'Donations',
   cat_savings_investments:'Savings and investments', cat_other_expenses:'Other expenses',
   cat_salary:'Salary', cat_business:'Business income', cat_investment_income:'Investment income',
   cat_other_income:'Other income', cat_transfer:'Transfer between accounts',
@@ -598,6 +769,7 @@ function applyI18n() {
   document.documentElement.lang = lang;
   document.querySelectorAll('[data-i18n]').forEach(el => el.textContent = t(el.dataset.i18n));
   document.querySelectorAll('[data-i18n-ph]').forEach(el => el.placeholder = t(el.dataset.i18nPh));
+  document.querySelectorAll('[data-i18n-title]').forEach(el => el.title = t(el.dataset.i18nTitle));
   document.querySelectorAll('[data-i18n-html]').forEach(el => el.innerHTML = t(el.dataset.i18nHtml));
 }
 
@@ -723,6 +895,7 @@ async function loadOverview() {
   const net = ov.income + ov.expense + ov.transfers;
   $('#ovNet').textContent = fmt(net); $('#ovNet').className = 'value ' + (net>=0?'green':'red');
   $('#ovNW').textContent = fmt(nw.net_worth);
+  $('#ovNWHint').textContent = unverified(nw.accounts);
   chart('catChart', {type:'doughnut', data:{labels:ov.by_category.map(x=>catLabel(x.category_key, x.category)),
     datasets:[{data:ov.by_category.map(x=>x.spent)}]},
     options:{maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{color:'#e8ecf4'}}}}});
@@ -832,7 +1005,7 @@ function shiftTxPeriod(step) {
 }
 
 async function loadTransactions() {
-  await fillTxPeriod();
+  await Promise.all([fillTxPeriod(), fillTags()]);
   {
     const accs = await api('/api/accounts');
     const cur = $('#txAccount').value;
@@ -847,25 +1020,115 @@ async function loadTransactions() {
   if ($('#txAccount').value) p.set('account_id', $('#txAccount').value);
   if ($('#txSearch').value) p.set('q', $('#txSearch').value);
   if ($('#txUncat').checked) p.set('uncategorized','true');
-  const txs = await api('/api/transactions?'+p);
+  if ($('#txAi').checked) p.set('source','ai');
+  if ($('#txTag').value) { p.set('tag_id', $('#txTag').value); p.set('limit', '10000'); }
+  const [txs, total] = await Promise.all([api('/api/transactions?'+p), api('/api/transactions/total?'+p)]);
+  renderTxTotal(total, txs.length);
   // the API sorts by kind and English name; keep the kinds together, sort each by the shown label
   const cats = categories.map(c => ({...c, label: catLabel(c.key, c.name)}))
     .sort((a, b) => a.kind.localeCompare(b.kind) || byLabel(a, b));
   const opts = cid => '<option value="">—</option>' + cats.map(c =>
     `<option value="${c.id}" ${c.id===cid?'selected':''}>${c.label}</option>`).join('');
+  $('#txSelAll').checked = false;
   $('#txTable tbody').innerHTML = txs.map(t2 => `<tr>
+    <td><input type="checkbox" class="txSel" value="${t2.id}" onchange="updateTagBar()"></td>
     <td class="nowrap">${t2.date}</td><td class="hint nowrap">${t2.account}</td>
-    <td class="nowrap" title="${(t2.description||'').replace(/"/g,'&quot;')}">${t2.description||''}</td>
+    <td class="nowrap" title="${(t2.description||'').replace(/"/g,'&quot;')}">${t2.tags.map(g =>
+      `<span class="chip" onclick="filterTag(${g.id})">🏷 ${esc(g.name)}</span>`).join('')}${esc(t2.description||'')}</td>
     <td class="nowrap" title="${(t2.counterparty||'').replace(/"/g,'&quot;')}">${t2.counterparty||''}</td>
-    <td><select onchange="setCat(${t2.id}, this.value)">${opts(t2.category_id)}</select></td>
+    <td><div class="catcell">${t2.category_source === 'ai' ? `<span id="aiMark${t2.id}" title="${esc(t('ai_mark'))}">🤖</span>` : ''}<select onchange="setCat(${t2.id}, this.value)">${opts(t2.category_id)}</select></div></td>
     <td class="num"><span class="${t2.amount>=0?'green':'red'}">${fmt(t2.amount)}</span>${t2.running_balance == null
       ? '' : `<br><span class="hint" title="${esc(t('running_title'))}">${fmt(t2.running_balance)}</span>`}</td>
     <td><button class="btn" onclick="delTx(${t2.id})">✕</button></td></tr>`).join('');
   $('#txAmountHead').textContent = t($('#txAccount').value ? 'col_amount_running' : 'col_amount');
+  updateTagBar();
 }
+
+// Tags (a trip, an event): a movement keeps its category and can carry tags across accounts
+// and years. The sums come from the server for everything the filter matches, not only the
+// rows shown.
+async function fillTags() {
+  const tags = await api('/api/tags'), cur = $('#txTag').value;
+  $('#txTag').innerHTML = `<option value="">🏷 ${esc(t('tag_all'))}</option>` +
+    tags.map(g => `<option value="${g.id}">🏷 ${esc(g.name)} (${g.count})</option>`).join('');
+  $('#txTag').value = tags.some(g => String(g.id) === cur) ? cur : '';
+  $('#tagList').innerHTML = tags.map(g => `<option value="${esc(g.name)}">`).join('');
+  $('#txTagEdit').classList.toggle('hidden', !$('#txTag').value);
+  $('#txTagDel').classList.toggle('hidden', !$('#txTag').value);
+  return tags;
+}
+function renderTxTotal(tot, shown) {
+  const cats = tot.by_category.filter(c => c.amount < 0).map(c =>
+    `${esc(catLabel(c.category_key, c.category) || '—')} ${fmt(c.amount)}`).join(' · ');
+  $('#txTotal').innerHTML = t('tx_total')(tot.count, `<b class="red">${fmt(tot.expense)}</b>`,
+      `<b class="green">${fmt(tot.income)}</b>`, `<b>${fmt(tot.net)}</b>`)
+    + (shown < tot.count ? ' · ' + esc(t('tx_shown')(shown)) : '')
+    + (tot.transfers ? ' · ' + esc(t('tx_transfers')(fmt(tot.transfers))) : '')
+    + ($('#txTag').value && cats ? `<br>${cats}` : '');
+}
+const selectedTx = () => [...document.querySelectorAll('.txSel:checked')].map(i => +i.value);
+function selectAllTx(on) {
+  document.querySelectorAll('.txSel').forEach(i => { i.checked = on; });
+  updateTagBar();
+}
+// always in sight, so it can be found; the buttons wait for ticked movements
+function updateTagBar() {
+  const n = selectedTx().length;
+  $('#txSelCount').textContent = n ? t('tag_selected')(n) : t('tag_how');
+  $('#txTagAdd').disabled = $('#txTagRemove').disabled = !n;
+}
+async function tagSelected(add) {
+  const ids = selectedTx(), name = $('#txTagName').value.trim();
+  if (!ids.length || !name) return;
+  try {
+    if (add) {
+      await api('/api/tags/apply', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({tag: name, transaction_ids: ids})});
+    } else {
+      const tag = (await api('/api/tags')).find(g => g.name.toLowerCase() === name.toLowerCase());
+      if (!tag) return;
+      await api('/api/tags/remove', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({tag_id: tag.id, transaction_ids: ids})});
+    }
+  } catch(e) { alert(e.message); return; }
+  await fillTags();
+  loadTransactions();
+}
+// a tag spans years: choosing one shows all of them
+async function filterTag(id) {
+  await fillTags();
+  $('#txTag').value = String(id);
+  txPeriod = {year: '', month: ''};
+  loadTransactions();
+}
+async function renameTag() {
+  const opt = $('#txTag').selectedOptions[0];
+  const name = prompt(t('tag_rename_prompt'), opt.textContent.replace(/^🏷 /, '').replace(/ \(\d+\)$/, ''));
+  if (!name || !name.trim()) return;
+  try {
+    await api('/api/tags/' + $('#txTag').value, {method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name})});
+  } catch(e) { alert(e.message); }
+  await fillTags(); loadTransactions();
+}
+async function deleteTag() {
+  const opt = $('#txTag').selectedOptions[0];
+  if (!confirm(t('tag_delete_confirm')(opt.textContent.replace(/^🏷 /, '')))) return;
+  await api('/api/tags/' + $('#txTag').value, {method: 'DELETE'});
+  $('#txTag').value = '';
+  await fillTags(); loadTransactions();
+}
+// The user's choice: it always beats the AI and is learned for the same counterparty. The
+// server counts the other movements of that counterparty the choice could go to (never one
+// the user set otherwise) and the change is offered for them too.
 async function setCat(id, v) {
-  await api('/api/transactions/'+id, {method:'PATCH', headers:{'Content-Type':'application/json'},
+  const r = await api('/api/transactions/'+id, {method:'PATCH', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({category_id: v?+v:null})});
+  document.getElementById('aiMark'+id)?.remove();
+  if (r.similar && confirm(t('apply_similar')(r.similar, r.similar_to))) {
+    await api(`/api/transactions/${id}/apply-similar`, {method:'POST'});
+    loadTransactions();
+  }
 }
 async function delTx(id) {
   if (!confirm(t('del_tx_confirm'))) return;
@@ -919,6 +1182,7 @@ async function delCat(id, name) {
 async function loadAssets() {
   const nw = await api('/api/networth');
   $('#nwAccounts').textContent = fmt(nw.total_accounts);
+  $('#nwAccountsHint').textContent = unverified(nw.accounts);
   $('#nwAssets').textContent = fmt(nw.total_assets);
   $('#nwTotal').textContent = fmt(nw.net_worth);
   $('#assetTable tbody').innerHTML = nw.assets.map(a => `<tr>
@@ -957,6 +1221,13 @@ async function addAccount() {
 }
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
+// Accounts whose balance is only the sum of an incomplete history: nobody confirmed it (✎),
+// so it may be far off — a card statement that starts with a repayment shows a credit
+const unverified = accounts => {
+  const list = accounts.filter(a => !a.balance_date && a.first_date && Math.abs(a.balance) >= 0.005);
+  return list.length ? t('nw_unverified')(list.map(a => `${a.name} (${fmt(a.balance)})`).join(', ')) : '';
+};
+
 async function loadImport() {
   const accs = await api('/api/accounts');
   $('#accTable tbody').innerHTML = accs.map(a => `<tr>
@@ -964,7 +1235,8 @@ async function loadImport() {
     <td>${esc(a.name)}</td><td class="hint">${t('acct_'+a.type) !== 'acct_'+a.type ? t('acct_'+a.type) : a.type}</td>
     <td class="nowrap hint">${a.first_date ? `${a.first_date} – ${a.last_date}` : '–'}</td>
     <td class="num">${fmt(a.balance)}<br><span class="hint ${a.balance_date ? '' : 'warn'}">${a.balance_date
-      ? t('bal_known')(a.balance_date) : t('bal_unknown')}</span>${checkStatus(a)}</td>
+      ? t('bal_known')(a.balance_date) : t('bal_unknown')}</span>${!a.balance_date && a.type === 'credit_card' && a.balance > 0
+      ? `<br><span class="hint warn" title="${esc(t('card_plus_title'))}">${esc(t('card_plus'))}</span>` : ''}${checkStatus(a)}</td>
     <td><button class="btn" title="${esc(t('bal_set_title'))}" onclick="setBalance(${a.id})">✎</button></td>
     <td><button class="btn" title="${esc(t('check_title'))}" onclick="checkBalance(${a.id})">⚖</button></td>
     <td><button class="btn" onclick="delAccount(${a.id}, '${a.name.replace(/'/g,"\\'")}')">✕</button></td></tr>`).join('');
@@ -1263,8 +1535,87 @@ async function undoImport(id) {
   } catch(e) { alert(e.message); }
 }
 
+// Plan: recurring payments found in the transactions and the outlook for the next twelve
+// months. Every figure comes from the server (planning.py); nothing is computed here.
+let fcData = null;
+function recRow(i, other) {
+  const amount = `<span class="${i.kind === 'income' ? 'green' : 'red'}">${fmt(i.kind === 'income' ? i.amount : -i.amount)}</span>`
+    + (i.changed_from != null ? `<small class="warn">${esc(t('rec_changed')(fmt(i.changed_from)))}</small>` : '')
+    + (!i.fixed ? `<small class="hint">${esc(t('rec_variable'))}</small>` : '');
+  const state = i.ignored ? t('rec_ignored') : !i.active ? t('rec_ended') : '';
+  const btn = i.ignored
+    ? `<button class="btn" title="${esc(t('rec_restore'))}" onclick='ignoreRec(${JSON.stringify(i.key)}, false)'>↺</button>`
+    : `<button class="btn" title="${esc(t('rec_ignore'))}" onclick='ignoreRec(${JSON.stringify(i.key)}, true)'>✕</button>`;
+  return `<tr><td>${esc(i.name)}<small class="hint">${esc(i.accounts.join(', '))}${state ? ' · ' + esc(state) : ''}</small></td>
+    <td>${esc(catLabel(i.category_key, i.category) || '—')}</td><td class="nowrap">${esc(t('per_' + i.period))}</td>
+    <td class="num">${amount}</td><td class="num">${fmt(i.monthly)}</td>
+    <td class="nowrap hint">${i.last}</td><td class="nowrap">${other ? '–' : i.next}</td><td>${btn}</td></tr>`;
+}
+async function loadPlan() {
+  const floor = +$('#fcFloor').value || 0;
+  const [rec, fc] = await Promise.all([api('/api/recurring'), api(`/api/forecast?floor=${floor}`)]);
+  $('#plFixedM').textContent = fmt(rec.totals.expense.monthly);
+  $('#plFixedQ').textContent = fmt(rec.totals.expense.quarterly);
+  $('#plFixedY').textContent = fmt(rec.totals.expense.yearly);
+  $('#plIncomeM').textContent = fmt(rec.totals.income.monthly);
+  const shown = rec.items.filter(i => i.active && !i.ignored), other = rec.items.filter(i => !i.active || i.ignored);
+  $('#recTable tbody').innerHTML = shown.map(i => recRow(i, false)).join('');
+  $('#recNone').classList.toggle('hidden', rec.items.length > 0);
+  $('#recMore').classList.toggle('hidden', !other.length);
+  $('#recMoreSum').textContent = t('rec_more')(other.length);
+  $('#recOther tbody').innerHTML = other.map(i => recRow(i, true)).join('');
+  renderForecast(fc);
+}
+function renderForecast(fc) {
+  fcData = fc;
+  $('#fcHint').textContent = t('forecast_hint')(fc.from, fc.to, fmt(fc.start_balance));
+  $('#fcMin').textContent = fmt(fc.min_income);
+  $('#fcMinHint').textContent = t('fc_min_hint')(fmt(fc.floor), fc.tight_month);
+  $('#fcCover').textContent = fmt(fc.cover_income);
+  $('#fcExp').textContent = fmt(fc.expenses_monthly);
+  $('#fcExpHint').textContent = fc.basis.months
+    ? t('fc_expenses_hint')(fmt(fc.fixed_monthly), fmt(fc.basis.variable_monthly), fc.basis.months, fc.basis.from, fc.basis.to)
+    : t('fc_no_basis');
+  $('#fcReg').textContent = fmt(fc.regular_income_monthly);
+  $('#fcRegHint').textContent = t('fc_surplus')(fc.regular_income_monthly - fc.expenses_monthly);
+  $('#fcTable tbody').innerHTML = fc.months.map(m => `<tr><td class="nowrap">${m.month}</td>
+    <td class="num">${fmt(m.fixed)}</td><td class="num">${fmt(m.variable)}</td><td class="num">${m.planned ? fmt(m.planned) : '–'}</td>
+    <td class="num red">${fmt(m.expenses)}</td><td class="num green">${fmt(m.regular_income)}</td>
+    <td class="num ${m.balance_regular_income < fc.floor ? 'red' : ''}">${fmt(m.balance_regular_income)}</td>
+    <td class="num">${fmt(m.balance_min_income)}</td></tr>`).join('');
+  chart('fcChart', {type: 'line', data: {labels: fc.months.map(m => m.month), datasets: [
+      {label: t('fc_chart_regular'), data: fc.months.map(m => m.balance_regular_income), borderColor: '#3ecf8e', backgroundColor: '#3ecf8e', tension: .2},
+      {label: t('fc_chart_min'), data: fc.months.map(m => m.balance_min_income), borderColor: '#f5a623', backgroundColor: '#f5a623', tension: .2},
+      {label: t('floor_label'), data: fc.months.map(() => fc.floor), borderColor: '#ff6b6b', borderDash: [6, 4], pointRadius: 0, borderWidth: 1}]},
+    options: {maintainAspectRatio: false, scales: {x: {ticks: {color: '#8b96ab'}}, y: {ticks: {color: '#8b96ab', callback: v => fmt(v)}}},
+      plugins: {legend: {labels: {color: '#e8ecf4'}}}}});
+  $('#planMonth').innerHTML = fc.months.map(m => `<option value="${m.month}">${m.month}</option>`).join('');
+  $('#planTable tbody').innerHTML = fc.plans.length ? fc.plans.map((p, i) => `<tr><td>${esc(p.name)}</td>
+    <td class="nowrap">${p.month}</td><td class="num red">${fmt(-p.amount)}</td>
+    <td><button class="btn" onclick="delPlan(${i})">✕</button></td></tr>`).join('')
+    : `<tr><td class="hint">${esc(t('plans_none'))}</td></tr>`;
+}
+async function ignoreRec(key, ignored) {
+  await api('/api/recurring/ignore', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({key, ignored})});
+  loadPlan();
+}
+async function savePlans(plans) {
+  try {
+    await api('/api/forecast/plans', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(plans)});
+  } catch(e) { alert(e.message); }
+  renderForecast(await api(`/api/forecast?floor=${+$('#fcFloor').value || 0}`));
+}
+function addPlan() {
+  const name = $('#planName').value.trim(), amount = +$('#planAmount').value;
+  if (!name || !(amount > 0)) return;
+  savePlans([...fcData.plans, {name, month: $('#planMonth').value, amount}]);
+  $('#planName').value = ''; $('#planAmount').value = '';
+}
+function delPlan(i) { savePlans(fcData.plans.filter((_, j) => j !== i)); }
+
 function load(tab) {
-  ({overview:loadOverview, transactions:loadTransactions, budget:loadBudget,
+  ({overview:loadOverview, transactions:loadTransactions, budget:loadBudget, plan:loadPlan,
     assets:loadAssets, import:loadImport}[tab])();
 }
 
@@ -1302,7 +1653,10 @@ $('#langSel').onchange = () => {
     $('#ovPreset').value = 'custom'; loadOverview();
   }));
   ['#txYear','#txMonth'].forEach(s => $(s).addEventListener('change', () => { readTxPeriod(); loadTransactions(); }));
-  ['#txAccount','#txSearch','#txUncat','#buMonth'].forEach(s =>
+  $('#fcFloor').addEventListener('change', async () =>
+    renderForecast(await api(`/api/forecast?floor=${+$('#fcFloor').value || 0}`)));
+  $('#txTag').addEventListener('change', () => { if ($('#txTag').value) txPeriod = {year: '', month: ''}; loadTransactions(); });
+  ['#txAccount','#txSearch','#txUncat','#txAi','#buMonth'].forEach(s =>
     $(s).addEventListener('change', () => load(document.querySelector('nav .active').dataset.tab)));
   applyPanels();
   categories = await api('/api/categories');

@@ -2,6 +2,8 @@
 # Use requires prior written permission; see LICENSE.
 
 """Local personal finance web app. Run: python -m financie -> http://localhost:8500"""
+import json
+import re
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
@@ -11,13 +13,18 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from financie import db, gemma, importer
+from financie import db, gemma, importer, planning
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # created on startup, not on import, so tests can point db.DB_PATH elsewhere first
     db.init_db()
+    con = db.get_db()
+    try:   # movements imported before the pairing existed, or a pair whose other side came later
+        importer.link_own_transfers(con)
+    finally:
+        con.close()
     yield
 
 
@@ -91,6 +98,67 @@ def balances(date_from: str, date_to: str, accounts: str | None = None):
         con.close()
 
 
+# ---------- Plan: recurring payments and the outlook ----------
+
+def _account_ids(accounts: str | None) -> list[int] | None:
+    return None if accounts is None else [int(x) for x in accounts.split(",") if x.strip().isdigit()]
+
+
+@app.get("/api/recurring")
+def recurring_payments(accounts: str | None = None):
+    """Recurring payments and income found in the transactions (planning.recurring)."""
+    con = db.get_db()
+    try:
+        return planning.recurring(con, _account_ids(accounts))
+    finally:
+        con.close()
+
+
+class RecurringIgnore(BaseModel):
+    key: str
+    ignored: bool = True
+
+
+@app.post("/api/recurring/ignore")
+def recurring_ignore(r: RecurringIgnore):
+    """Mark a found group as not recurring (or undo it); it then counts as variable spending."""
+    con = db.get_db()
+    try:
+        planning.set_ignored(con, r.key, r.ignored)
+        return {"ok": True}
+    finally:
+        con.close()
+
+
+@app.get("/api/forecast")
+def forecast(accounts: str | None = None, floor: float = 0.0):
+    """The next twelve months: expenses, the income needed to stay above `floor` (planning.forecast)."""
+    con = db.get_db()
+    try:
+        return planning.forecast(con, _account_ids(accounts), floor)
+    finally:
+        con.close()
+
+
+class Plan(BaseModel):
+    name: str
+    month: str
+    amount: float
+
+
+@app.put("/api/forecast/plans")
+def forecast_plans(items: list[Plan]):
+    """Planned extra expenses of the outlook (a holiday, a new appliance), month YYYY-MM."""
+    for p in items:
+        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", p.month) or p.amount <= 0:
+            raise HTTPException(400, {"code": "invalid_plan", "info": p.name})
+    con = db.get_db()
+    try:
+        return planning.set_plans(con, [p.model_dump() for p in items])
+    finally:
+        con.close()
+
+
 # ---------- Transactions ----------
 
 @app.get("/api/transactions/years")
@@ -104,15 +172,10 @@ def transaction_years():
         con.close()
 
 
-@app.get("/api/transactions")
-def transactions(month: str | None = None, year: str | None = None, category_id: int | None = None,
-                 account_id: int | None = None, uncategorized: bool = False,
-                 q: str | None = None, limit: int = 500):
-    sql = """SELECT t.*, c.name AS category, c.key AS category_key, a.name AS account
-             FROM transactions t
-             LEFT JOIN categories c ON c.id = t.category_id
-             JOIN accounts a ON a.id = t.account_id WHERE 1=1"""
-    params = []
+def _tx_filter(month=None, year=None, category_id=None, account_id=None, uncategorized=False,
+               source=None, q=None, tag_id=None) -> tuple[str, list]:
+    """The WHERE part shared by the transaction list and its total."""
+    sql, params = " WHERE 1=1", []
     if month:
         sql += " AND substr(t.date,1,7) = ?"; params.append(month)
     if year:
@@ -123,12 +186,33 @@ def transactions(month: str | None = None, year: str | None = None, category_id:
         sql += " AND t.account_id = ?"; params.append(account_id)
     if uncategorized:
         sql += " AND t.category_id IS NULL"
+    if source:   # e.g. "ai": the categories the AI guessed, for checking them
+        sql += " AND t.category_id IS NOT NULL AND t.category_source = ?"; params.append(source)
     if q:
         sql += " AND (t.description LIKE ? OR t.counterparty LIKE ?)"
         params += [f"%{q}%", f"%{q}%"]
-    sql += " ORDER BY t.date DESC, t.id DESC LIMIT ?"; params.append(limit)
+    if tag_id:
+        sql += " AND t.id IN (SELECT transaction_id FROM transaction_tags WHERE tag_id = ?)"; params.append(tag_id)
+    return sql, params
+
+
+@app.get("/api/transactions")
+def transactions(month: str | None = None, year: str | None = None, category_id: int | None = None,
+                 account_id: int | None = None, uncategorized: bool = False, source: str | None = None,
+                 q: str | None = None, tag_id: int | None = None, limit: int = 500):
+    where, params = _tx_filter(month, year, category_id, account_id, uncategorized, source, q, tag_id)
+    sql = f"""SELECT t.*, c.name AS category, c.key AS category_key, a.name AS account,
+                     (SELECT json_group_array(json_object('id', g.id, 'name', g.name))
+                      FROM transaction_tags tt JOIN tags g ON g.id = tt.tag_id
+                      WHERE tt.transaction_id = t.id) AS tags
+              FROM transactions t
+              LEFT JOIN categories c ON c.id = t.category_id
+              JOIN accounts a ON a.id = t.account_id{where}
+              ORDER BY t.date DESC, t.id DESC LIMIT ?"""
     con = db.get_db()
-    rows = [dict(r) for r in con.execute(sql, params)]
+    rows = [dict(r) for r in con.execute(sql, [*params, limit])]
+    for r in rows:
+        r["tags"] = json.loads(r["tags"] or "[]")
     if account_id:  # one account: the balance after each movement, as in online banking
         running = db.running_balances(con, account_id)
         for r in rows:
@@ -137,20 +221,179 @@ def transactions(month: str | None = None, year: str | None = None, category_id:
     return rows
 
 
+@app.get("/api/transactions/total")
+def transactions_total(month: str | None = None, year: str | None = None, category_id: int | None = None,
+                       account_id: int | None = None, uncategorized: bool = False, source: str | None = None,
+                       q: str | None = None, tag_id: int | None = None):
+    """The sums of everything the same filter matches (no limit), e.g. what a trip cost:
+    expenses and income without transfers, the transfers apart, and the expenses by category."""
+    where, params = _tx_filter(month, year, category_id, account_id, uncategorized, source, q, tag_id)
+    base = f"FROM transactions t LEFT JOIN categories c ON c.id = t.category_id{where}"
+    con = db.get_db()
+    try:
+        count, expense, income, transfers = con.execute(f"""
+            SELECT COUNT(*),
+                   COALESCE(SUM(CASE WHEN t.amount < 0 AND COALESCE(c.kind,'') != 'transfer' THEN t.amount END), 0),
+                   COALESCE(SUM(CASE WHEN t.amount > 0 AND COALESCE(c.kind,'') != 'transfer' THEN t.amount END), 0),
+                   COALESCE(SUM(CASE WHEN c.kind = 'transfer' THEN t.amount END), 0) {base}""", params).fetchone()
+        by_category = [dict(r) for r in con.execute(f"""
+            SELECT c.name AS category, c.key AS category_key, ROUND(SUM(t.amount), 2) AS amount {base}
+              AND COALESCE(c.kind,'') != 'transfer'
+            GROUP BY c.id ORDER BY SUM(t.amount)""", params)]
+        return {"count": count, "expense": round(expense, 2), "income": round(income, 2),
+                "net": round(expense + income, 2), "transfers": round(transfers, 2), "by_category": by_category}
+    finally:
+        con.close()
+
+
+# ---------- Tags ----------
+
+@app.get("/api/tags")
+def tags():
+    con = db.get_db()
+    try:
+        return [dict(r) for r in con.execute("""
+            SELECT g.id, g.name, COUNT(tt.transaction_id) AS count
+            FROM tags g LEFT JOIN transaction_tags tt ON tt.tag_id = g.id
+            GROUP BY g.id ORDER BY g.name COLLATE NOCASE""")]
+    finally:
+        con.close()
+
+
+class TagApply(BaseModel):
+    tag: str
+    transaction_ids: list[int]
+
+
+@app.post("/api/tags/apply")
+def tag_apply(body: TagApply):
+    """Put a tag on transactions; a new name creates the tag (names ignore case)."""
+    name = " ".join(body.tag.split())
+    if not name:
+        raise HTTPException(400, {"code": "tag_required"})
+    con = db.get_db()
+    try:
+        con.execute("INSERT OR IGNORE INTO tags(name) VALUES (?)", (name,))
+        tag_id = con.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()[0]
+        added = sum(con.execute("INSERT OR IGNORE INTO transaction_tags(transaction_id, tag_id) "
+                                "SELECT id, ? FROM transactions WHERE id = ?", (tag_id, i)).rowcount
+                    for i in body.transaction_ids)
+        con.commit()
+        return {"tag_id": tag_id, "added": added}
+    finally:
+        con.close()
+
+
+class TagRemove(BaseModel):
+    tag_id: int
+    transaction_ids: list[int]
+
+
+@app.post("/api/tags/remove")
+def tag_remove(body: TagRemove):
+    """Take a tag off transactions; a tag left without any is deleted."""
+    con = db.get_db()
+    try:
+        removed = sum(con.execute("DELETE FROM transaction_tags WHERE tag_id=? AND transaction_id=?",
+                                  (body.tag_id, i)).rowcount for i in body.transaction_ids)
+        con.execute("DELETE FROM tags WHERE id=? AND NOT EXISTS "
+                    "(SELECT 1 FROM transaction_tags WHERE tag_id=?)", (body.tag_id, body.tag_id))
+        con.commit()
+        return {"removed": removed}
+    finally:
+        con.close()
+
+
+class TagRename(BaseModel):
+    name: str
+
+
+@app.patch("/api/tags/{tag_id}")
+def tag_rename(tag_id: int, body: TagRename):
+    name = " ".join(body.name.split())
+    if not name:
+        raise HTTPException(400, {"code": "tag_required"})
+    con = db.get_db()
+    try:
+        taken = con.execute("SELECT id FROM tags WHERE name=? AND id != ?", (name, tag_id)).fetchone()
+        if taken:
+            raise HTTPException(400, {"code": "tag_exists", "info": name})
+        con.execute("UPDATE tags SET name=? WHERE id=?", (name, tag_id))
+        con.commit()
+        return {"ok": True}
+    finally:
+        con.close()
+
+
+@app.delete("/api/tags/{tag_id}")
+def tag_delete(tag_id: int):
+    """Delete a tag; its transactions stay, they only lose the tag."""
+    con = db.get_db()
+    try:
+        con.execute("DELETE FROM tags WHERE id=?", (tag_id,))
+        con.commit()
+        return {"ok": True}
+    finally:
+        con.close()
+
+
 class TxPatch(BaseModel):
     category_id: int | None = None
     description: str | None = None
 
 
+def _similar(con, tx_id: int, category_id: int | None) -> tuple[str, str, list[int]] | None:
+    """Other transactions of the same payment (same counterparty, else description) that would
+    take the new category: uncategorized ones and those a rule, the learning or the AI chose —
+    never another choice of the user's own."""
+    tx = con.execute("SELECT counterparty, description FROM transactions WHERE id=?", (tx_id,)).fetchone()
+    same = tx and importer.similar_field(tx)
+    if not same:
+        return None
+    field, value = same
+    ids = [r[0] for r in con.execute(
+        f"""SELECT id FROM transactions WHERE {field} = ? AND id != ?
+            AND COALESCE(category_source, '') != 'user'
+            AND COALESCE(category_id, -1) != COALESCE(?, -1)""", (value, tx_id, category_id))]
+    return field, value, ids
+
+
 @app.patch("/api/transactions/{tx_id}")
 def patch_tx(tx_id: int, patch: TxPatch):
+    """A category set here is the user's own choice. The answer counts the similar transactions
+    the same choice could go to (`similar`), for the UI to offer it."""
     con = db.get_db()
-    if patch.category_id is not None:
-        con.execute("UPDATE transactions SET category_id=? WHERE id=?", (patch.category_id, tx_id))
-    if patch.description is not None:
-        con.execute("UPDATE transactions SET description=? WHERE id=?", (patch.description, tx_id))
-    con.commit(); con.close()
-    return {"ok": True}
+    try:
+        out = {"ok": True, "similar": 0}
+        if "category_id" in patch.model_fields_set:
+            cid = patch.category_id
+            con.execute("UPDATE transactions SET category_id=?, category_source=? WHERE id=?",
+                        (cid, "user" if cid else None, tx_id))
+            same = cid and _similar(con, tx_id, cid)
+            if same:
+                out.update(similar=len(same[2]), similar_to=same[1])
+        if patch.description is not None:
+            con.execute("UPDATE transactions SET description=? WHERE id=?", (patch.description, tx_id))
+        con.commit()
+        return out
+    finally:
+        con.close()
+
+
+@app.post("/api/transactions/{tx_id}/apply-similar")
+def apply_similar(tx_id: int):
+    """Give the similar transactions (see _similar) the category the user just chose for this one."""
+    con = db.get_db()
+    try:
+        cid = con.execute("SELECT category_id FROM transactions WHERE id=?", (tx_id,)).fetchone()
+        same = cid and _similar(con, tx_id, cid[0])
+        ids = same[2] if same else []
+        con.executemany("UPDATE transactions SET category_id=?, category_source=? WHERE id=?",
+                        [(cid[0], "user" if cid[0] else None, i) for i in ids])
+        con.commit()
+        return {"changed": len(ids)}
+    finally:
+        con.close()
 
 
 @app.delete("/api/transactions/{tx_id}")

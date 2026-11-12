@@ -19,7 +19,7 @@ DB_PATH = Path(os.environ.get("FINANCIE_DB", PROJECT_DIR / "financie.db"))
 IMPORTS_DIR = os.environ.get("FINANCIE_IMPORTS")
 
 # PRAGMA user_version of the current schema; init_db() migrates older databases
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     description TEXT,
     counterparty TEXT,
     category_id INTEGER REFERENCES categories(id),
+    category_source TEXT,                        -- who chose it: user / rule / learned / ai (schema v7)
     source_file TEXT,
     import_hash TEXT UNIQUE,                     -- dedup on repeated imports
     created_at TEXT DEFAULT (datetime('now')),
@@ -108,6 +109,20 @@ CREATE TABLE IF NOT EXISTS imports (
 );
 CREATE INDEX IF NOT EXISTS idx_imports_hash ON imports(file_hash);
 
+-- tags such as a trip ("Sardinia 2025"): a transaction keeps its category and can carry tags
+-- across categories, accounts and years (schema v8); tags never take part in learning
+CREATE TABLE IF NOT EXISTS tags (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE
+);
+
+CREATE TABLE IF NOT EXISTS transaction_tags (
+    transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (transaction_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS idx_tx_tags_tag ON transaction_tags(tag_id);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -136,6 +151,7 @@ DEFAULT_CATEGORIES = [
     ("household", "Household", "expense"), ("insurance", "Insurance", "expense"),
     ("fees", "Fees", "expense"), ("gifts", "Gifts", "expense"),
     ("sport", "Sport", "expense"), ("subscriptions", "Subscriptions", "expense"),
+    ("internet_phone", "Internet and phone", "expense"), ("donations", "Donations", "expense"),
     ("savings_investments", "Savings and investments", "expense"),
     ("other_expenses", "Other expenses", "expense"),
     ("salary", "Salary", "income"), ("business", "Business income", "income"),
@@ -143,6 +159,15 @@ DEFAULT_CATEGORIES = [
     ("transfer", "Transfer between accounts", "transfer"),
 ]
 DEFAULT_ACCOUNT = ("Checking account", "checking")
+
+# Default categories added later: a category the user already made for the same purpose
+# (by one of these names, any case) becomes the default one, so there are never two.
+ADOPT_NAMES = {
+    "internet_phone": ("internet and phone", "internet und telefon", "internet a telefón", "internet a telefon",
+                       "telefon und internet", "telefón a internet", "telefon a internet", "internet & telefon",
+                       "internet/telefon", "internet", "telefon", "telefón", "telefonie", "phone"),
+    "donations": ("donations", "donation", "spenden", "spende", "dary", "dar", "charity"),
+}
 
 # schema version 0 stored Slovak values; version 1 stores English codes and names
 V0_CATEGORY_KEYS = {
@@ -187,9 +212,12 @@ def init_db():
         _migrate_v3_to_v4(con)
     if existing and version < 5:
         _migrate_v4_to_v5(con)
+    if existing and version < 7:
+        _migrate_v6_to_v7(con)
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_key ON categories(key)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_tx_import ON transactions(import_id)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_tx_ref ON transactions(account_id, ref)")
+    _adopt_user_categories(con)
     for key, name, kind in DEFAULT_CATEGORIES:
         con.execute("INSERT OR IGNORE INTO categories(key, name, kind) VALUES (?,?,?)", (key, name, kind))
     if con.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0:
@@ -197,6 +225,18 @@ def init_db():
     con.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     con.commit()
     con.close()
+
+
+def _adopt_user_categories(con):
+    """Give a user's own category the key of a default one added later (see ADOPT_NAMES): its
+    id, name and transactions stay, the UI then shows it translated."""
+    taken = {r["key"] for r in con.execute("SELECT key FROM categories WHERE key IS NOT NULL")}
+    own = con.execute("SELECT id, name FROM categories WHERE key IS NULL ORDER BY id").fetchall()
+    for key, names in ADOPT_NAMES.items():
+        match = next((r for r in own if r["name"].strip().casefold() in names), None)
+        if key not in taken and match:
+            con.execute("UPDATE categories SET key=?, kind='expense' WHERE id=?", (key, match["id"]))
+            own = [r for r in own if r["id"] != match["id"]]
 
 
 def backup_db(con, version: int) -> Path:
@@ -272,6 +312,16 @@ def _migrate_v4_to_v5(con):
         con.execute("ALTER TABLE accounts ADD COLUMN balance_amount REAL")
     con.commit()
     print("[db] migrated schema v4 -> v5 (known balance)")
+
+
+def _migrate_v6_to_v7(con):
+    """Who chose a transaction's category. Earlier choices cannot be told apart, so they all
+    count as the user's own: nothing the user set is ever overruled by a guess."""
+    if "category_source" not in [r["name"] for r in con.execute("PRAGMA table_info(transactions)")]:
+        con.execute("ALTER TABLE transactions ADD COLUMN category_source TEXT")
+        con.execute("UPDATE transactions SET category_source='user' WHERE category_id IS NOT NULL")
+    con.commit()
+    print("[db] migrated schema v6 -> v7 (category source)")
 
 
 def get_setting(con, key: str, default: str | None = None) -> str | None:

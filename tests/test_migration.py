@@ -138,3 +138,22 @@ def test_v1_database_gets_the_import_history(tmp_path, monkeypatch):
     assert rows(path, "SELECT balance_date, balance_amount FROM accounts") == [(None, None)]   # v5
     assert rows(path, "SELECT COUNT(*) FROM balance_checks") == [(0,)]                       # v6
     assert len(list(tmp_path.glob("v1-backup-v1-*.db"))) == 1
+
+
+def test_new_default_categories_take_over_the_users_own(tmp_path, monkeypatch):
+    """A database from before "Internet and phone" and "Donations" were defaults, where the
+    user made "Spenden" himself: it becomes the default one, with its transactions."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "old.db")
+    db.init_db()
+    con = sqlite3.connect(db.DB_PATH)
+    con.execute("DELETE FROM categories WHERE key IN ('internet_phone', 'donations')")
+    own = con.execute("INSERT INTO categories(name, kind) VALUES ('Spenden', 'expense')").lastrowid
+    con.execute("""INSERT INTO transactions(account_id, date, amount, description, category_id, import_hash)
+                   VALUES (1, '2026-05-01', -20, 'Spende', ?, 'h1')""", (own,))
+    con.commit()
+    con.close()
+    db.init_db()
+    assert rows(db.DB_PATH, "SELECT id, name, key FROM categories WHERE key='donations'") == [(own, "Spenden", "donations")]
+    assert rows(db.DB_PATH, "SELECT category_id FROM transactions") == [(own,)]
+    assert rows(db.DB_PATH, "SELECT name FROM categories WHERE key='internet_phone'") == [("Internet and phone",)]
+    assert rows(db.DB_PATH, "SELECT COUNT(*) FROM categories WHERE name IN ('Donations', 'Spenden')") == [(1,)]

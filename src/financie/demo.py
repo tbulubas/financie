@@ -26,7 +26,7 @@ MONTHS = 10   # full months of history before the current one
 # counterparty -> default category key, applied as if the user had sorted them once
 CATEGORY_OF = {
     "Muster GmbH": "salary", "Hausverwaltung Muster": "housing", "Stadtwerke Musterstadt": "energy",
-    "Versicherung Muster AG": "insurance", "Mobilfunk Muster": "subscriptions",
+    "Versicherung Muster AG": "insurance", "Kfz-Versicherung Muster": "car", "Mobilfunk Muster": "internet_phone", "Hilfswerk Muster": "donations",
     "Streaming Muster": "subscriptions", "Verkehrsverbund Muster": "transport",
     "Supermarkt Nord": "groceries", "Bio-Markt Muster": "groceries", "Discounter Sued": "groceries",
     "Pizzeria Muster": "restaurants", "Cafe am Markt": "restaurants", "Tankstelle Muster": "car",
@@ -64,8 +64,11 @@ def _movements(today: date) -> dict[str, list[tuple[date, float, str, str]]]:
                  (day(12), -29.99, "Mobilfunk Muster", "Rechnung Mobilfunk"),
                  (day(15), -95.00, "Stadtwerke Musterstadt", "Abschlag Strom"),
                  (day(18), -12.99, "Streaming Muster", "Abo"),
-                 (day(22), -35.00, "Sportverein Muster", "Mitgliedsbeitrag")]
+                 (day(22), -35.00, "Sportverein Muster", "Mitgliedsbeitrag"),
+                 (day(25), -20.00, "Hilfswerk Muster", "Spende")]
         savings.append((day(5), 400.00, "Giro", "Dauerauftrag Sparen"))
+        if m.month in (1, 4, 7, 10):
+            giro.append((day(10), -142.80, "Kfz-Versicherung Muster", "Beitrag Quartal"))
         if m.month in (1, 4, 7, 10):
             savings.append((day(1), round(rnd.uniform(18, 26), 2), "Zinsen", "Zinsgutschrift"))
         for d in range(1, 29, 3):
@@ -204,7 +207,8 @@ def build(folder: Path, today: date | None = None) -> Path:
     con = db.get_db()
     keys = {r["key"]: r["id"] for r in con.execute("SELECT id, key FROM categories WHERE key IS NOT NULL")}
     for party, key in CATEGORY_OF.items():
-        con.execute("UPDATE transactions SET category_id=? WHERE counterparty=?", (keys[key], party))
+        con.execute("UPDATE transactions SET category_id=?, category_source='user' WHERE counterparty=?",
+                    (keys[key], party))
     # balances as the user would enter them (✎ and ⚖): the card from its statement, the savings
     # account from online banking — whose last check shows a movement missing in the app
     yesterday = (today - timedelta(days=1)).isoformat()
@@ -219,6 +223,17 @@ def build(folder: Path, today: date | None = None) -> Path:
                     [(keys["groceries"], 450), (keys["restaurants"], 120), (keys["subscriptions"], 50),
                      (keys["car"], 90)])
     con.execute("INSERT INTO budgets(category_id, month, amount) VALUES (?, ?, ?)", (keys["travel"], month, 300))
+    # two trips, tagged as the user would: the train, the hotel and the meals of those days
+    for tag, mm in (("Hamburg weekend", "05"), ("Lake Constance", "08")):
+        tag_id = con.execute("INSERT INTO tags(name) VALUES (?)", (f"{tag} {today.year}",)).lastrowid
+        con.execute("""INSERT INTO transaction_tags(transaction_id, tag_id)
+                       SELECT id, ? FROM transactions WHERE substr(date, 6, 2) = ? AND (
+                           counterparty IN ('Bahn Muster', 'Hotel Muster') OR
+                           (counterparty IN ('Pizzeria Muster', 'Cafe am Markt') AND substr(date, 9, 2) BETWEEN '09' AND '12'))""",
+                    (tag_id, mm))
+    from financie import planning
+    planning.set_plans(con, [{"name": "Summer holiday", "month": f"{today.year + 1}-07", "amount": 1800},
+                             {"name": "New washing machine", "month": f"{today.year + 1}-03", "amount": 650}])
     for name, kind, start, step in (("Apartment", "real_estate", 285000, 1200), ("ETF portfolio", "etf", 18400, 410),
                                     ("Mortgage", "liability", -182000, 610)):
         asset = con.execute("INSERT INTO assets(name, type) VALUES (?, ?)", (name, kind)).lastrowid

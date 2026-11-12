@@ -991,16 +991,32 @@ def format_report(r: dict) -> str:
     return "\n".join(lines)
 
 
+# who chose a category, strongest first: the user's own choice always wins over a rule, a
+# rule over what was learned from the user, and anything over a guess of the AI
+SOURCE_RANK = "CASE category_source WHEN 'user' THEN 0 WHEN 'rule' THEN 1 WHEN 'learned' THEN 2 ELSE 3 END"
+
+
+def similar_field(tx) -> tuple[str, str] | None:
+    """What makes two transactions "the same payment": the counterparty, else the description."""
+    for field in ("counterparty", "description"):
+        val = (tx[field] or "").strip()
+        if len(val) >= 3:
+            return field, val
+    return None
+
+
 def _learned_category(con, tx: dict) -> int | None:
-    """If a similar transaction was categorized before, reuse its category (no LLM)."""
+    """If a similar transaction was categorized before, reuse its category (no LLM). The
+    strongest source decides — one correction by the user beats any number of AI guesses —
+    and within it the category used most often."""
     for field in ("counterparty", "description"):
         val = (tx.get(field) or "").strip()
         if len(val) < 3:
             continue
         row = con.execute(
-            f"""SELECT category_id, COUNT(*) c FROM transactions
+            f"""SELECT category_id, COUNT(*) c, {SOURCE_RANK} r FROM transactions
                 WHERE {field} = ? AND category_id IS NOT NULL
-                GROUP BY category_id ORDER BY c DESC LIMIT 1""", (val,)).fetchone()
+                GROUP BY category_id, r ORDER BY r, c DESC LIMIT 1""", (val,)).fetchone()
         if row:
             return row["category_id"]
     return None
@@ -1034,10 +1050,64 @@ def _link_funding_transfers(con) -> int:
             ORDER BY ABS(julianday(date) - julianday(?)) LIMIT 1""",
             (f["account_id"], f["amount"], f["date"], transfer["id"], *words, f["date"])).fetchone()
         if match:
-            con.execute("UPDATE transactions SET category_id=? WHERE id=?", (transfer["id"], match["id"]))
+            con.execute("UPDATE transactions SET category_id=?, category_source='rule' WHERE id=?",
+                        (transfer["id"], match["id"]))
             linked += 1
     con.commit()
     return linked
+
+
+OWN_TRANSFER_DAYS = 7   # a repayment or a move shows on the other account within a week
+
+
+def link_own_transfers(con) -> int:
+    """Pair money moved between the user's own accounts and mark both sides as transfers.
+
+    A card repayment, a move from the current account to savings or a PayPal top-up leaves
+    the same amount on one account and arrives on another: amounts equal to the cent with
+    opposite signs, on different accounts, at most OWN_TRANSFER_DAYS apart. Each movement is
+    paired once: transfers already known pair among themselves first, then the closest dates. A movement the user categorized himself is never
+    changed (it can still be the other side of a pair when the user made it a transfer), so
+    setting any category undoes a wrong pair for good. A merchant's refund does not pair: it
+    leaves none of the user's accounts. (The counterparty cannot tell either way: a move between
+    two accounts of the user often names the user on both sides.) Runs after every import and on start.
+    Returns the number of movements newly marked."""
+    transfer = con.execute("SELECT id FROM categories WHERE key='transfer'").fetchone()
+    if not transfer:
+        return 0
+    transfer_ids = {r["id"] for r in con.execute("SELECT id FROM categories WHERE kind='transfer'")}
+    rows = con.execute("SELECT id, account_id, date, amount, category_id, category_source "
+                       "FROM transactions WHERE amount != 0").fetchall()
+    by_amount: dict[float, list] = {}
+    for r in rows:
+        is_transfer = r["category_id"] in transfer_ids
+        free = r["category_source"] != "user" and not is_transfer       # may be marked
+        if free or is_transfer:                                         # may be a side of a pair
+            by_amount.setdefault(round(abs(r["amount"]), 2), []).append((r, free))
+    pairs = []
+    for group in by_amount.values():
+        out = [g for g in group if g[0]["amount"] < 0]
+        into = [g for g in group if g[0]["amount"] > 0]
+        for a, a_free in out:
+            da = date.fromisoformat(a["date"])
+            for b, b_free in into:
+                if b["account_id"] == a["account_id"]:
+                    continue
+                days = abs((date.fromisoformat(b["date"]) - da).days)
+                if days <= OWN_TRANSFER_DAYS:
+                    # two transfers already (e.g. a PayPal funding and its card debit) pair
+                    # first, so neither is free to pair with a payment of the same amount
+                    pairs.append((a_free or b_free, days, a["date"], a["id"], b["id"], a_free, b_free))
+    used, marked = set(), []
+    for _, _, _, a, b, a_free, b_free in sorted(pairs):
+        if a in used or b in used:
+            continue
+        used.update((a, b))
+        marked += [i for i, free in ((a, a_free), (b, b_free)) if free]
+    con.executemany("UPDATE transactions SET category_id=?, category_source='rule' WHERE id=?",
+                    [(transfer["id"], i) for i in marked])
+    con.commit()
+    return len(marked)
 
 
 def import_transactions(account_id: int, filename: str, txs: list[dict],
@@ -1094,16 +1164,18 @@ def import_transactions(account_id: int, filename: str, txs: list[dict],
                 known[same] -= 1
                 skipped += 1
                 continue
-        cat_id = cat_by_key.get(tx.get("category_key")) or _learned_category(con, tx)
+        cat_id, source = cat_by_key.get(tx.get("category_key")), "rule"
+        if cat_id is None:
+            cat_id, source = _learned_category(con, tx), "learned"
         try:
             cur = con.execute(
                 """INSERT INTO transactions
                    (account_id, date, amount, currency, description, counterparty,
-                    category_id, source_file, import_hash, import_id, ref)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    category_id, category_source, source_file, import_hash, import_id, ref)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (account_id, tx["date"], tx["amount"], tx.get("currency", "EUR"),
                  tx.get("description", ""), tx.get("counterparty", ""),
-                 cat_id, filename, h, import_id, ref))
+                 cat_id, source if cat_id else None, filename, h, import_id, ref))
             tx_id = cur.lastrowid
             inserted.append((tx_id, tx))
             if cat_id is None:
@@ -1118,7 +1190,7 @@ def import_transactions(account_id: int, filename: str, txs: list[dict],
         """SELECT 1 FROM transactions WHERE account_id=? AND date=? AND ROUND(amount - ?, 2) = 0
            AND id != ? AND COALESCE(source_file,'') != ? LIMIT 1""",
         (account_id, tx["date"], tx["amount"], tx_id, filename)).fetchone())
-    linked = _link_funding_transfers(con)
+    linked = _link_funding_transfers(con) + link_own_transfers(con)
 
     categorized = 0
     if use_gemma_categorize and to_categorize and gemma.available():
@@ -1131,7 +1203,13 @@ def import_transactions(account_id: int, filename: str, txs: list[dict],
 
 
 def _gemma_batch_categorize(con, items: list[tuple[int, dict]], cat_by_name: dict) -> int:
-    """Categorize transactions in batches via Gemma. Errors are logged to the terminal."""
+    """Categorize transactions in batches via Gemma. Errors are logged to the terminal.
+
+    Gemma is never offered a transfer category: a transfer is left out of income and expenses,
+    so only the rules and the user decide what is one. A movement Gemma gives no valid answer
+    for stays uncategorized."""
+    transfers = {r["name"] for r in con.execute("SELECT name FROM categories WHERE kind='transfer'")}
+    cat_by_name = {n: i for n, i in cat_by_name.items() if n not in transfers}
     names = list(cat_by_name.keys())
     categorized, batch = 0, 15
     total = (len(items) + batch - 1) // batch
@@ -1141,7 +1219,7 @@ def _gemma_batch_categorize(con, items: list[tuple[int, dict]], cat_by_name: dic
             cats = gemma.categorize([t for _, t in chunk], names)
             for (tx_id, _), cat_name in zip(chunk, cats):
                 if cat_name in cat_by_name:
-                    con.execute("UPDATE transactions SET category_id=? WHERE id=?",
+                    con.execute("UPDATE transactions SET category_id=?, category_source='ai' WHERE id=?",
                                 (cat_by_name[cat_name], tx_id))
                     categorized += 1
             con.commit()
@@ -1164,7 +1242,8 @@ def categorize_uncategorized(limit: int = 200) -> dict:
         tx = dict(r)
         cid = _learned_category(con, tx)
         if cid:
-            con.execute("UPDATE transactions SET category_id=? WHERE id=?", (cid, r["id"]))
+            con.execute("UPDATE transactions SET category_id=?, category_source='learned' WHERE id=?",
+                        (cid, r["id"]))
             learned += 1
         else:
             remaining.append((r["id"], tx))

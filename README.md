@@ -30,7 +30,7 @@ whether Gemma is ready.
 | Without Gemma (no Ollama) | Needs Gemma |
 |---|---|
 | Import of CSV, Excel and CAMT (XML/ZIP) statements of the recognized formats, and of other CSV/Excel files whose columns have usual names (date, amount, description …) | Import of **PDF** statements and of **screenshots or scans** |
-| Dedup, transfers, known balances, balance checks, charts, budget, assets | A CSV/Excel layout whose columns the app cannot match by name (Gemma maps them) |
+| Dedup, transfers, known balances, balance checks, charts, budget, assets, recurring payments and the outlook | A CSV/Excel layout whose columns the app cannot match by name (Gemma maps them) |
 | Categories: you assign them, and the app **learns** from you — the next movement with the same counterparty gets the same category by itself, on import already | **🤖 Recategorize**: suggestions for movements the app has not learned yet |
 
 So with CSV or CAMT exports from your bank you can skip Ollama entirely and
@@ -46,9 +46,10 @@ quickly.
 | ![The statements folder: every file with its bank, period, account and state](docs/images/import.png) | ![Transactions of one account with categories and the balance after each movement](docs/images/transactions.png) |
 | Every statement in the folder with its bank, period and account; nothing is imported before GO, and a file already imported is recognized by its content. | Categories you fix are learned; with one account chosen, every movement shows the balance after it, as in online banking. |
 
-| Assets |  |
+| Plan | Assets |
 |---|---|
-| ![Assets and liabilities with the net worth trend](docs/images/assets.png) | Accounts, assets and liabilities add up to the net worth; record a valuation now and then and the chart shows how it develops. |
+| ![Recurring payments and the outlook for the next twelve months](docs/images/plan.png) | ![Assets and liabilities with the net worth trend](docs/images/assets.png) |
+| Recurring payments found in the transactions (monthly, quarterly, yearly) and an outlook for the next twelve months: the income you need so the balance never drops below a floor you choose. | Accounts, assets and liabilities add up to the net worth; record a valuation now and then and the chart shows how it develops. |
 
 ## Try it with invented data
 
@@ -199,6 +200,10 @@ that. You can still pick files by hand instead.
   account, card, PayPal), so the next download of the same source lands in the
   same account. A new source gets a proposed account; every account needs a
   name of its own.
+- **Transfers between your accounts are found by themselves.** The same amount
+  leaving one of your accounts and arriving on another within a week — a card
+  repayment, a move to savings, a PayPal top-up — is a transfer on both sides, so it
+  is neither income nor an expense. A category you set yourself is never changed.
 - **No double counting.** Files are recognized by their content, so a renamed
   copy is never imported twice into one account. Overlapping statements are
   safe: transactions already there are skipped, also when another export format
@@ -252,6 +257,11 @@ rarely right. The app works with what the bank states instead:
   day and says from which day the app is off, if at all. The difference is
   computed live: importing a missing movement or deleting a doubled one clears
   it at once.
+- **Unconfirmed balances are named.** An account without a known balance shows the
+  sum of the movements you imported — for a card whose statement starts with a
+  repayment of older purchases, that is a credit that does not exist. The net worth
+  names such accounts until you enter their real balance (✎), and a credit card in
+  credit is flagged on the *Import* tab.
 - **Finding a difference.** Filter one account under *Transactions*: each
   movement shows the balance after it, as in online banking, so the day where
   the app and the bank part is easy to find.
@@ -289,13 +299,67 @@ Income, expenses by category and the monthly trend for a period.
 
 Review the automatic categories and fix what is needed. The app remembers your
 corrections: next time it assigns the same counterparty by itself, without AI.
+
+- **Your choice always wins.** The app records who chose each category — you, a
+  format rule, the learning or the AI. When it learns, one correction of yours
+  outweighs any number of AI guesses, and **🤖 Recategorize** fills only empty
+  categories, never one that is set.
+- **Change all at once.** When you change a category, the app offers to change it
+  for the other movements of the same counterparty too — those without a category
+  or set by a rule, the learning or the AI, never another choice of yours.
+- **Check the AI.** Categories the AI guessed carry 🤖; *AI only* lists just those.
+  The AI never marks anything as a transfer (transfers are left out of income and
+  expenses, so only the rules and you decide that), and a movement it gives no
+  answer for stays uncategorized.
+- **The total of what you see.** Above the list: how many movements match the
+  filter and their expenses, income and total (transfers between your accounts are
+  shown apart and not counted) — for all of them, also when the list shows only the
+  first rows.
+- **Tags, e.g. for a trip.** Tick movements (or all shown), type a tag such as
+  *Sardinia 2025* and press *Add tag*. A movement keeps its category and can carry
+  several tags; tags never change what the app learns. Choosing a tag in the filter
+  (or clicking 🏷 on a movement) shows all its movements across accounts and years —
+  the flight booked months before included — with the total and the expenses by
+  category: what the trip cost for travel, accommodation, restaurants, …
+  ✎ renames a tag, ✕ deletes it (the movements stay).
+- **A good start:** add your own categories (*Budget* tab), give one payment of
+  each regular counterparty a category by hand (rent, salary, phone, insurance,
+  donations, …), then press 🤖 Recategorize: the learned ones are filled in first,
+  without AI, and Gemma only guesses the rest.
 Pick the period with the year and month lists (*Whole year* shows all of it,
 *All years* everything); ◀ ▶ move by a month, or by a year when the whole year
 is shown.
 
+### Plan
+
+- **Recurring payments.** The app finds them in your transactions: the same
+  counterparty paid at a regular interval — monthly, quarterly, half-yearly or
+  yearly (a yearly one needs a little over a year of history). For each you see
+  the current amount, a recent price change ("before €950"), what it costs per
+  month, and when it is due next. The totals give your **fixed costs per month,
+  quarter and year**, next to your regular income. Transfers between your own
+  accounts do not count; payments that stopped are listed apart, and ✕ hides one
+  that is not really recurring (it then counts as everyday spending).
+- **Outlook for 12 months.** From the first of next month: the recurring payments
+  on their due dates, the everyday spending of an average month (the mean of up to
+  twelve complete months of the latest stretch of your data) and the extras you
+  plan (a holiday, a washing machine). Starting from today's balance of all
+  accounts except investment ones, it shows
+  - the **minimum income per month** that keeps the balance above a floor you
+    set (0 = no debt) in every month,
+  - the **income without using savings**, which covers each month's expenses
+    and leaves today's balance as it is,
+  - and month by month the balance with your current regular income.
+
+  Every figure is plain arithmetic on your own data, with its assumptions on the
+  page — an estimate, not financial advice. No AI is involved.
+
 ### Budget and assets
 
-- **Budget** — set monthly limits per category (Enter saves).
+- **Budget** — set monthly limits per category (Enter saves). The default
+  categories (groceries, housing, internet and phone, donations, …) are translated
+  into all three languages; add your own there too (*New category*). The app learns
+  your own categories like the default ones, and Gemma gets them as well.
 - **Assets** — add assets (apartment, ETF, crypto…) and liabilities (mortgage —
   enter a negative value). Record the current valuation from time to time; the
   chart shows how your net worth develops.
@@ -400,6 +464,7 @@ src/financie/
   gemma.py            Ollama client: structured JSON output, vision for scans
   cli.py              command line interface (python -m financie, inspect, demo)
   demo.py             invented accounts, statements and assets for the demo
+  planning.py         recurring payments and the twelve-month outlook
   static/index.html   the whole frontend: markup, CSS, JS, i18n
   static/vendor/      Chart.js 4.4.4 with its MIT licence (no CDN)
 tests/                parsing and API tests with invented data

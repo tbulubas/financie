@@ -48,6 +48,7 @@ pytest, shared IntelliJ run configs, copyright header in every source file.
 | `src/financie/importer.py` | statement parsing (CSV/XLSX/XLS/PDF/images), dedup, categorization |
 | `src/financie/gemma.py` | Ollama client — structured JSON output, vision for scans |
 | `src/financie/cli.py` | `python -m financie [--host] [--port]` |
+| `src/financie/planning.py` | recurring payments and the twelve-month outlook (no LLM) |
 | `src/financie/demo.py` | `python -m financie demo` / `make demo`: invented data in a new temp folder |
 | `docs/images/` | README screenshots, taken from the demo only |
 | `src/financie/static/index.html` | entire frontend: markup, CSS, JS, i18n |
@@ -69,6 +70,17 @@ pytest, shared IntelliJ run configs, copyright header in every source file.
   AI categorization is user-triggered via `POST /api/categorize`.
 - **Learned categories beat the LLM.** `_learned_category()` reuses the user's
   own past corrections by counterparty/description — check it before any AI call.
+- **Who chose a category** (`transactions.category_source`, schema v7): `user` (set in
+  the UI — every category set through `PATCH /api/transactions/{id}`), `rule` (a format
+  rule or `_link_funding_transfers()`), `learned`, `ai`. Anything that sets
+  `category_id` sets the source too. `_learned_category()` takes the strongest source
+  first (`SOURCE_RANK`): one user choice beats any number of AI guesses. The PATCH
+  answer counts the movements of the same counterparty (else description) that are not
+  the user's own choice and have another category (`similar`); the UI offers them,
+  `POST /api/transactions/{id}/apply-similar` changes them, never another user choice.
+  Gemma is never offered a transfer category, and a movement it gives no valid answer
+  for stays uncategorized. `GET /api/transactions?source=ai` lists the AI's guesses (🤖).
+  The v6 → v7 migration marks every existing category as the user's.
 - **Dedup** via `import_hash` (account + date + amount + description, plus the
   source's own reference such as the PayPal transaction code when there is one).
   The reference is also stored in `transactions.ref` (schema v4): a row whose
@@ -109,6 +121,9 @@ pytest, shared IntelliJ run configs, copyright header in every source file.
   falls back to `name` for user-defined categories (`key IS NULL`). A new
   default category needs a key in `DEFAULT_CATEGORIES` and `cat_<key>` in all
   three languages.
+  `init_db()` inserts missing defaults into existing databases (no migration needed);
+  for one added later, list its usual names in `ADOPT_NAMES`, so a category the user
+  already made for it (e.g. "Spenden") takes the key instead of getting a twin.
 - **Schema changes go through migrations.** `PRAGMA user_version` holds the
   version (`SCHEMA_VERSION` in `db.py`); `init_db()` backs the database up next
   to itself (`<stem>-backup-v<old>-<timestamp>.db`) and then runs the
@@ -117,6 +132,19 @@ pytest, shared IntelliJ run configs, copyright header in every source file.
   migration on an invented old-layout database (see `tests/test_migration.py`).
 - Transactions in a category with `kind='transfer'` are excluded from income
   and expense totals (used for credit-card settlements).
+- **Transfers between own accounts** (`link_own_transfers()`, after every import and
+  on start): the same amount to the cent with opposite signs on two different accounts,
+  at most `OWN_TRANSFER_DAYS` (7) apart, each movement paired once (transfers already
+  known pair among themselves first, then the closest dates) — both sides become
+  `transfer` with source `rule`. A side the user categorized is never changed; a user
+  transfer can still be the partner. This covers card repayments of any bank, current
+  ↔ savings and PayPal top-ups without naming banks (`FUNDING_PARTNERS` stays for
+  PayPal/Barclays funding rows). The counterparty is not compared: a move between two
+  own accounts often names the user on both sides.
+- **Unconfirmed balances.** An account with movements but no known balance has only the
+  sum of an incomplete history as balance; the overview's net worth and the Assets tab
+  name them (`unverified()` in `index.html`), and a credit card in credit without a known
+  balance is flagged on the Import tab (a statement starting with a repayment).
 - **Main account.** `accounts.is_main` marks the account salaries go to (schema
   v3); the rest are satellites (PayPal, cards). `GET /api/overview?accounts=1,2`
   limits the overview to those accounts and returns `transfers`, the sum of
@@ -144,10 +172,33 @@ pytest, shared IntelliJ run configs, copyright header in every source file.
   check stays chained, and newer stretches always chain from the known balance, so the
   current balance never moves. The chart breaks the line there (`balance: null`), the
   overview and the import result name the hole (`gaps`, `db.balance_gaps()`).
+- **Tags** (`tags`, `transaction_tags`, schema v8; names unique ignoring case, links
+  cascade when a transaction goes): `POST /api/tags/apply` (creates the tag),
+  `/api/tags/remove` (a tag left without movements is deleted), `PATCH` / `DELETE
+  /api/tags/{id}`. `GET /api/transactions` takes `tag_id` and returns `tags` per row.
+  Tags are for trips and events; they never feed `_learned_category()`. `GET
+  /api/transactions/total` sums everything the same filter matches (`_tx_filter()`,
+  no limit): expense, income, net without transfers, transfers apart, expenses by
+  category.
 - **Transactions period.** Year and month lists (`txPeriod` in `index.html`), not
   `<input type="month">`, whose year cannot be changed on its own. `GET
   /api/transactions/years` lists the years with data; `GET /api/transactions` takes
   `month` (`YYYY-MM`) or `year` (the UI raises `limit` for a whole year).
+- **Plan tab** (`planning.py`, `GET /api/recurring`, `GET /api/forecast?floor=`, `PUT
+  /api/forecast/plans`, `POST /api/recurring/ignore`). Recurring payments: transactions
+  of the last ~800 days (transfers left out) grouped by `group_key()` (counterparty, else
+  the first words of the description, without digits and punctuation, plus the sign);
+  `_period()` accepts a period when most intervals match it (a skipped payment and holes
+  in the history allowed; monthly and quarterly need 3 payments). Fewer than 4 payments
+  must have nearly the same amount. The amount is the last one when the last two agree
+  (a fixed amount, with `changed_from`), else the mean of the last six. Active = paid
+  within 1.5 periods of the end of the data. Ignored keys and planned extras live in
+  `settings` as JSON (`recurring_ignored`, `forecast_plans`), so no schema change. The
+  outlook: 12 months from the next month, recurring payments on their dates + the mean
+  everyday month (non-recurring expenses of up to 12 complete months of the latest
+  stretch) + plans, from today's balance of all non-investment accounts; `min_income`
+  keeps every month-end at or above `floor`, `cover_income` never touches today's
+  balance. All arithmetic in Python; the UI only shows it.
 - **Overview panels** (`[data-panel]` in `#tab-overview`): the 📊 menu hides or shows
   them, clicking a title collapses it; `applyPanels()` keeps both in `localStorage`
   (`ovPanels`). A new chart on the overview gets a `data-panel` and a menu entry.

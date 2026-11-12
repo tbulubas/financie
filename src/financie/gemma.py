@@ -125,7 +125,5 @@ def categorize(transactions: list[dict], categories: list[str]) -> list[str]:
     )
     out = json.loads(chat(prompt, json_schema=schema))
     cats = out.get("categories", [])
-    # pad with a fallback if the model returns fewer items
-    while len(cats) < len(transactions):
-        cats.append(categories[-1] if categories else "")
-    return cats[: len(transactions)]
+    # fewer answers than transactions: the missing ones stay uncategorized (no guessed filler)
+    return (cats + [""] * len(transactions))[: len(transactions)]
