@@ -168,6 +168,10 @@
     <button class="btn" onclick="recat()">🤖 <span data-i18n="recat_btn"></span></button>
     <span id="recatMsg" class="hint"></span>
   </div>
+  <div class="toolbar hidden" id="txFromBar">
+    <span class="chip">📊 <span id="txFromLabel"></span></span>
+    <button class="btn" onclick="clearTxFrom()" data-i18n="tx_from_clear"></button>
+  </div>
   <div class="hint" id="txTotal"></div>
   <div class="toolbar" id="txTagBar">
     <span class="hint" id="txSelCount"></span>
@@ -433,6 +437,7 @@ sk: {
   card_plus:'⚠ kladný zostatok karty — zadaj skutočný ✎',
   card_plus_title:'Kreditná karta s kladným zostatkom: výpis takmer vždy začína splátkou za staršie nákupy, ktoré v ňom nie sú. Zadaj skutočný zostatok (✎).',
   nw_unverified:list=>`⚠ neoverené zostatky (zadaj ich ✎ na karte Import): ${list}`,
+  uncategorized:'Bez kategórie', tx_from_clear:'✕ Zrušiť filter z prehľadu',
   tag_ph:'Štítok, napr. Sardínia 2025', tag_add:'Pridať štítok', tag_remove:'Odobrať štítok', tag_all:'Všetky štítky',
   tag_selected:n=>`${n} vybraných`, tag_how:'Štítok (napr. dovolenka): zaškrtni pohyby vľavo ☑ →', tag_rename:'Premenovať štítok', tag_delete:'Zmazať štítok',
   tag_rename_prompt:'Nový názov štítka:', tag_delete_confirm:name=>`Zmazať štítok „${name}“? Pohyby ostanú, len stratia tento štítok.`,
@@ -569,6 +574,7 @@ de: {
   card_plus:'⚠ Kreditkarte im Plus — echten Saldo eingeben ✎',
   card_plus_title:'Kreditkarte im Plus: der Auszug beginnt fast immer mit einer Rückzahlung für ältere Umsätze, die er nicht enthält. Echten Saldo eingeben (✎).',
   nw_unverified:list=>`⚠ nicht bestätigte Salden (mit ✎ im Tab Import eingeben): ${list}`,
+  uncategorized:'Ohne Kategorie', tx_from_clear:'✕ Filter aus der Übersicht aufheben',
   tag_ph:'Schlagwort, z. B. Sardinien 2025', tag_add:'Schlagwort setzen', tag_remove:'Schlagwort entfernen', tag_all:'Alle Schlagwörter',
   tag_selected:n=>`${n} ausgewählt`, tag_how:'Schlagwort (z. B. Urlaub): Umsätze links ankreuzen ☑ →', tag_rename:'Schlagwort umbenennen', tag_delete:'Schlagwort löschen',
   tag_rename_prompt:'Neuer Name des Schlagworts:', tag_delete_confirm:name=>`Schlagwort „${name}“ löschen? Die Umsätze bleiben, sie verlieren nur das Schlagwort.`,
@@ -706,6 +712,7 @@ en: {
   card_plus:'⚠ credit card in credit — enter the real balance ✎',
   card_plus_title:'A credit card in credit: the statement nearly always starts with a repayment for older purchases it does not hold. Enter the real balance (✎).',
   nw_unverified:list=>`⚠ unconfirmed balances (enter them with ✎ on the Import tab): ${list}`,
+  uncategorized:'Uncategorized', tx_from_clear:'✕ Clear the filter from the overview',
   tag_ph:'Tag, e.g. Sardinia 2025', tag_add:'Add tag', tag_remove:'Remove tag', tag_all:'All tags',
   tag_selected:n=>`${n} selected`, tag_how:'Tag (e.g. a trip): tick movements on the left ☑ →', tag_rename:'Rename tag', tag_delete:'Delete tag',
   tag_rename_prompt:'New name of the tag:', tag_delete_confirm:name=>`Delete the tag "${name}"? The movements stay, they only lose the tag.`,
@@ -873,6 +880,42 @@ function pickAccounts() {
   loadOverview();
 }
 
+// The overview's period and accounts, for opening the movements behind a chart slice
+let ovState = null;
+// Filters taken over from the overview (a period, several accounts, a category): they stand in
+// for the period and account lists until cleared or until one of those lists is changed
+let txFrom = null;
+function openCategory(c) {
+  const names = ovState.accounts && ovAccounts.filter(a => ovState.accounts.includes(a.id)).map(a => a.name);
+  txFrom = {date_from: ovState.from, date_to: ovState.to, accounts: ovState.accounts, category_id: c.category_id,
+            label: [`${ovState.from} – ${ovState.to}`, names ? names.join(', ') : t('all_accounts'),
+                    c.category_id == null ? t('uncategorized') : catLabel(c.category_key, c.category)].join(' · ')};
+  $('#txUncat').checked = c.category_id == null;
+  $('#txAi').checked = false; $('#txSearch').value = ''; $('#txTag').value = '';
+  document.querySelector('nav [data-tab=transactions]').click();
+}
+function clearTxFrom() { txFrom = null; loadTransactions(); }
+
+// Every category keeps its color in every period: the color follows the category, not its
+// rank in the chart. The default ones have a palette picked to stay apart; a category of the
+// user's own gets a hue from its place among all categories (the golden angle spreads them).
+// Movements without a category are grey.
+const CAT_COLORS = {
+  groceries:'#3ecf8e', housing:'#4f8cff', energy:'#f5a623', transport:'#22d3ee', car:'#8b5cf6',
+  restaurants:'#ff6b6b', health:'#facc15', clothing:'#ff8fab', entertainment:'#c084fc', travel:'#14b8a6',
+  education:'#a3e635', children:'#fdba74', household:'#94a3b8', insurance:'#f97316', fees:'#a16207',
+  gifts:'#e879f9', sport:'#65a30d', subscriptions:'#6366f1', savings_investments:'#0ea5e9',
+  other_expenses:'#78716c', internet_phone:'#be185d', donations:'#fde68a',
+  salary:'#22c55e', business:'#059669', investment_income:'#10b981', other_income:'#4ade80', transfer:'#64748b',
+};
+function catColor(id, key) {
+  if (key && CAT_COLORS[key]) return CAT_COLORS[key];
+  if (id == null) return '#6b7280';
+  const i = categories.map(c => c.id).sort((a, b) => a - b).indexOf(id);
+  const hue = Math.round(((i < 0 ? id : i) * 137.508 + 30) % 360);
+  return `hsl(${hue}, 70%, ${i % 2 ? 66 : 50}%)`;
+}
+
 async function loadOverview() {
   const p = $('#ovPreset').value;
   const [from, to] = presetRange(p);
@@ -880,6 +923,7 @@ async function loadOverview() {
   if (!from || !to) return;
   ovAccounts = await api('/api/accounts');
   const sel = ovSelected(), all = sel.length === ovAccounts.length;
+  ovState = {from, to, accounts: all ? null : sel};
   renderOvPick(sel);
   coverageHint(sel, from);
   const accParam = all ? '' : `&accounts=${sel.join(',')}`;
@@ -896,9 +940,13 @@ async function loadOverview() {
   $('#ovNet').textContent = fmt(net); $('#ovNet').className = 'value ' + (net>=0?'green':'red');
   $('#ovNW').textContent = fmt(nw.net_worth);
   $('#ovNWHint').textContent = unverified(nw.accounts);
-  chart('catChart', {type:'doughnut', data:{labels:ov.by_category.map(x=>catLabel(x.category_key, x.category)),
-    datasets:[{data:ov.by_category.map(x=>x.spent)}]},
-    options:{maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{color:'#e8ecf4'}}}}});
+  chart('catChart', {type:'doughnut', data:{labels:ov.by_category.map(x=>x.category_id == null
+      ? t('uncategorized') : catLabel(x.category_key, x.category)),
+    datasets:[{data:ov.by_category.map(x=>x.spent), backgroundColor:ov.by_category.map(x=>catColor(x.category_id, x.category_key))}]},
+    options:{maintainAspectRatio:false, plugins:{legend:{position:'right',labels:{color:'#e8ecf4'}}},
+      // a slice opens its movements: the same period and accounts, that category
+      onClick:(e, els) => els.length && openCategory(ov.by_category[els[0].index]),
+      onHover:(e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; }}});
   chart('monthChart', {type:'bar', data:{labels:ov.monthly.map(x=>x.month),
     datasets:[{label:t('income'),data:ov.monthly.map(x=>x.income),backgroundColor:'#3ecf8e'},
               {label:t('expenses'),data:ov.monthly.map(x=>x.expense),backgroundColor:'#ff6b6b'}]},
@@ -1015,9 +1063,18 @@ async function loadTransactions() {
   }
   const p = new URLSearchParams();
   const year = $('#txYear').value, month = $('#txMonth').value;
-  if (year && month) p.set('month', `${year}-${month}`);
-  else if (year) { p.set('year', year); p.set('limit', '10000'); }   // a whole year has more than 500
-  if ($('#txAccount').value) p.set('account_id', $('#txAccount').value);
+  $('#txFromBar').classList.toggle('hidden', !txFrom);
+  ['#txYear', '#txMonth', '#txAccount'].forEach(s => { $(s).style.opacity = txFrom ? .45 : ''; });
+  if (txFrom) {
+    $('#txFromLabel').textContent = txFrom.label;
+    p.set('date_from', txFrom.date_from); p.set('date_to', txFrom.date_to); p.set('limit', '10000');
+    if (txFrom.accounts) p.set('accounts', txFrom.accounts.join(','));
+    if (txFrom.category_id != null) p.set('category_id', txFrom.category_id);
+  } else {
+    if (year && month) p.set('month', `${year}-${month}`);
+    else if (year) { p.set('year', year); p.set('limit', '10000'); }   // a whole year has more than 500
+    if ($('#txAccount').value) p.set('account_id', $('#txAccount').value);
+  }
   if ($('#txSearch').value) p.set('q', $('#txSearch').value);
   if ($('#txUncat').checked) p.set('uncategorized','true');
   if ($('#txAi').checked) p.set('source','ai');
@@ -1098,7 +1155,7 @@ async function tagSelected(add) {
 async function filterTag(id) {
   await fillTags();
   $('#txTag').value = String(id);
-  txPeriod = {year: '', month: ''};
+  txPeriod = {year: '', month: ''}; txFrom = null;
   loadTransactions();
 }
 async function renameTag() {
@@ -1652,10 +1709,11 @@ $('#langSel').onchange = () => {
   ['#ovFrom','#ovTo'].forEach(s => $(s).addEventListener('change', () => {
     $('#ovPreset').value = 'custom'; loadOverview();
   }));
-  ['#txYear','#txMonth'].forEach(s => $(s).addEventListener('change', () => { readTxPeriod(); loadTransactions(); }));
+  ['#txYear','#txMonth'].forEach(s => $(s).addEventListener('change', () => { txFrom = null; readTxPeriod(); loadTransactions(); }));
+  $('#txAccount').addEventListener('change', () => { txFrom = null; });
   $('#fcFloor').addEventListener('change', async () =>
     renderForecast(await api(`/api/forecast?floor=${+$('#fcFloor').value || 0}`)));
-  $('#txTag').addEventListener('change', () => { if ($('#txTag').value) txPeriod = {year: '', month: ''}; loadTransactions(); });
+  $('#txTag').addEventListener('change', () => { if ($('#txTag').value) { txPeriod = {year: '', month: ''}; txFrom = null; } loadTransactions(); });
   ['#txAccount','#txSearch','#txUncat','#txAi','#buMonth'].forEach(s =>
     $(s).addEventListener('change', () => load(document.querySelector('nav .active').dataset.tab)));
   applyPanels();

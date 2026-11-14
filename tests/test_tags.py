@@ -7,6 +7,7 @@ import sqlite3
 
 from financie import db
 from test_api import csv_bytes, upload
+from test_formats import add_account
 
 
 def trip(client, account_id):
@@ -93,3 +94,14 @@ def test_v7_database_gets_the_tag_tables(tmp_path, monkeypatch):
     assert con.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     con.close()
     assert len(list(tmp_path.glob("v7-backup-v7-*.db"))) == 1
+
+
+def test_the_overviews_filter_a_range_and_several_accounts(client, account_id):
+    other = add_account(client, "Visa")
+    trip(client, account_id)
+    upload(client, other, csv_bytes("03.06.2025;-12,00;Eis;Gelateria Muster"), "visa.csv")
+    params = {"date_from": "2025-06-03", "date_to": "2025-06-04", "accounts": f"{account_id},{other}"}
+    rows = client.get("/api/transactions", params=params).json()
+    assert sorted(t["description"] for t in rows) == ["Abendessen", "Eis", "Rueckerstattung"]
+    assert client.get("/api/transactions/total", params={**params, "accounts": str(other)}).json()["expense"] == -12.0
+    assert client.get("/api/transactions", params={**params, "accounts": ""}).json() == []

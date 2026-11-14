@@ -124,6 +124,9 @@ pytest, shared IntelliJ run configs, copyright header in every source file.
   `init_db()` inserts missing defaults into existing databases (no migration needed);
   for one added later, list its usual names in `ADOPT_NAMES`, so a category the user
   already made for it (e.g. "Spenden") takes the key instead of getting a twin.
+  Each category keeps one color everywhere (`catColor()`: `CAT_COLORS` by key for the
+  defaults — a new default needs one —, a golden-angle hue for the user's own), never
+  a color by its rank in a chart.
 - **Schema changes go through migrations.** `PRAGMA user_version` holds the
   version (`SCHEMA_VERSION` in `db.py`); `init_db()` backs the database up next
   to itself (`<stem>-backup-v<old>-<timestamp>.db`) and then runs the
@@ -180,6 +183,10 @@ pytest, shared IntelliJ run configs, copyright header in every source file.
   /api/transactions/total` sums everything the same filter matches (`_tx_filter()`,
   no limit): expense, income, net without transfers, transfers apart, expenses by
   category.
+  `_tx_filter()` also takes `date_from` / `date_to` / `accounts` (comma-separated): a
+  slice of *Expenses by category* opens Transactions with the overview's period,
+  accounts and that category (`openCategory()`, `txFrom` in `index.html`; the uncategorized
+  slice ticks "uncategorized only"); changing the period or account list drops it.
 - **Transactions period.** Year and month lists (`txPeriod` in `index.html`), not
   `<input type="month">`, whose year cannot be changed on its own. `GET
   /api/transactions/years` lists the years with data; `GET /api/transactions` takes

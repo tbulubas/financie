@@ -67,7 +67,7 @@ def overview(date_from: str | None = None, date_to: str | None = None,
         FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
         WHERE t.date BETWEEN ? AND ?{acc}""", period).fetchone()
     by_cat = [dict(r) for r in con.execute(f"""
-        SELECT COALESCE(c.name,'—') AS category, c.key AS category_key,
+        SELECT c.id AS category_id, COALESCE(c.name,'—') AS category, c.key AS category_key,
                ROUND(SUM(-t.amount),2) AS spent
         FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
         WHERE t.date BETWEEN ? AND ? AND t.amount < 0{acc}
@@ -173,9 +173,18 @@ def transaction_years():
 
 
 def _tx_filter(month=None, year=None, category_id=None, account_id=None, uncategorized=False,
-               source=None, q=None, tag_id=None) -> tuple[str, list]:
-    """The WHERE part shared by the transaction list and its total."""
+               source=None, q=None, tag_id=None, date_from=None, date_to=None,
+               accounts=None) -> tuple[str, list]:
+    """The WHERE part shared by the transaction list and its total. `date_from`/`date_to`
+    and `accounts` (comma-separated ids) take what the overview shows."""
     sql, params = " WHERE 1=1", []
+    if date_from:
+        sql += " AND t.date >= ?"; params.append(date_from)
+    if date_to:
+        sql += " AND t.date <= ?"; params.append(date_to)
+    if accounts is not None:
+        ids = [int(x) for x in accounts.split(",") if x.strip().isdigit()]
+        sql += f" AND t.account_id IN ({','.join('?' * len(ids)) or 'NULL'})"; params += ids
     if month:
         sql += " AND substr(t.date,1,7) = ?"; params.append(month)
     if year:
@@ -199,8 +208,10 @@ def _tx_filter(month=None, year=None, category_id=None, account_id=None, uncateg
 @app.get("/api/transactions")
 def transactions(month: str | None = None, year: str | None = None, category_id: int | None = None,
                  account_id: int | None = None, uncategorized: bool = False, source: str | None = None,
-                 q: str | None = None, tag_id: int | None = None, limit: int = 500):
-    where, params = _tx_filter(month, year, category_id, account_id, uncategorized, source, q, tag_id)
+                 q: str | None = None, tag_id: int | None = None, date_from: str | None = None,
+                 date_to: str | None = None, accounts: str | None = None, limit: int = 500):
+    where, params = _tx_filter(month, year, category_id, account_id, uncategorized, source, q, tag_id,
+                               date_from, date_to, accounts)
     sql = f"""SELECT t.*, c.name AS category, c.key AS category_key, a.name AS account,
                      (SELECT json_group_array(json_object('id', g.id, 'name', g.name))
                       FROM transaction_tags tt JOIN tags g ON g.id = tt.tag_id
@@ -224,10 +235,12 @@ def transactions(month: str | None = None, year: str | None = None, category_id:
 @app.get("/api/transactions/total")
 def transactions_total(month: str | None = None, year: str | None = None, category_id: int | None = None,
                        account_id: int | None = None, uncategorized: bool = False, source: str | None = None,
-                       q: str | None = None, tag_id: int | None = None):
+                       q: str | None = None, tag_id: int | None = None, date_from: str | None = None,
+                       date_to: str | None = None, accounts: str | None = None):
     """The sums of everything the same filter matches (no limit), e.g. what a trip cost:
     expenses and income without transfers, the transfers apart, and the expenses by category."""
-    where, params = _tx_filter(month, year, category_id, account_id, uncategorized, source, q, tag_id)
+    where, params = _tx_filter(month, year, category_id, account_id, uncategorized, source, q, tag_id,
+                               date_from, date_to, accounts)
     base = f"FROM transactions t LEFT JOIN categories c ON c.id = t.category_id{where}"
     con = db.get_db()
     try:

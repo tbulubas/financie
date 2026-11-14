@@ -285,6 +285,10 @@ Income, expenses by category and the monthly trend for a period.
   others appears as *Transfers to/from other accounts*, so the balance is the
   real change of those accounts. The overview warns when a chosen account has no
   data at the start of the period.
+- **From a chart to the movements.** Click a slice of *Expenses by category* (the grey
+  one is *Uncategorized*): *Transactions* opens with the same period, accounts and that
+  category, ready to check or categorize; *Clear the filter from the overview* goes back
+  to the usual lists.
 - **Balance over time.** The end-of-day balance of each chosen account and their
   total, with the balance checks as points: ✓ where the app matches the bank, ⚠
   where it is off (hover for the figures). A line starts on the first day the
