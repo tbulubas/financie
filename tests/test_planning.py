@@ -93,3 +93,37 @@ def test_plans_are_checked(client):
     fc = client.get("/api/forecast", params={"floor": 0}).json()
     assert fc["plans"] == [{"name": "Car", "month": "2027-05", "amount": 9000.0}]
     assert client.get("/api/recurring").json()["items"] == []
+
+
+def test_a_paused_salary_is_left_out_of_those_months(client, account_id):
+    upload(client, account_id, history(), "history.csv")
+    con = db.get_db()
+    salary = found(con)["Arbeitgeber Muster"]
+    before = {m["month"]: m for m in planning.forecast(con, today=TODAY)["months"]}
+    planning.set_paused(con, [{"key": salary["key"], "name": salary["name"], "from": "2027-01", "to": "2027-03"}])
+    fc = planning.forecast(con, today=TODAY)
+    months = {m["month"]: m for m in fc["months"]}
+    assert [months[k]["regular_income"] for k in ("2026-12", "2027-01", "2027-02", "2027-03", "2027-04")] \
+        == [3000.0, 0.0, 0.0, 0.0, 3000.0]
+    assert months["2027-02"]["paused"] == ["Arbeitgeber Muster"] and months["2027-04"]["paused"] == []
+    # three salaries less from March on; expenses and the minimum income do not change
+    assert round(before["2027-03"]["balance_regular_income"] - months["2027-03"]["balance_regular_income"], 2) == 9000.0
+    assert months["2027-03"]["expenses"] == before["2027-03"]["expenses"]
+    assert fc["paused"] == [{"key": salary["key"], "name": "Arbeitgeber Muster", "from": "2027-01", "to": "2027-03"}]
+
+    # a paused expense lowers the expenses of its month
+    rent = found(con)["Hausverwaltung Muster"]
+    planning.set_paused(con, [{"key": rent["key"], "name": rent["name"], "from": "2027-05", "to": "2027-05"}])
+    months = {m["month"]: m for m in planning.forecast(con, today=TODAY)["months"]}
+    assert months["2027-05"]["fixed"] == before["2027-05"]["fixed"] - 1000.0
+    con.close()
+
+
+def test_pauses_are_checked(client):
+    bad = [{"key": "+x", "from": "2027-03", "to": "2027-01"}]
+    r = client.put("/api/forecast/paused", json=bad)
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "invalid_pause"
+    assert client.put("/api/forecast/paused", json=[{"key": "+x", "from": "2027-1", "to": "2027-02"}]).status_code == 400
+    ok = [{"key": "+arbeitgeber muster", "name": "Arbeitgeber", "from": "2027-01", "to": "2027-03"}]
+    assert client.put("/api/forecast/paused", json=ok).json() == ok
+    assert client.get("/api/forecast").json()["paused"] == ok

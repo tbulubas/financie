@@ -30,6 +30,7 @@ LOOKBACK_DAYS = 800  # a little over two years: a yearly payment shows up twice
 HOLE_DAYS = 45       # no movement for longer: a hole in the history (as in db.GAP_DAYS)
 IGNORED_KEY = "recurring_ignored"   # settings: keys the user marked as not recurring
 PLANS_KEY = "forecast_plans"        # settings: planned extra expenses of the outlook
+PAUSED_KEY = "forecast_paused"      # settings: recurring payments left out of some months
 
 
 def group_key(amount: float, counterparty: str | None, description: str | None) -> str:
@@ -153,6 +154,19 @@ def set_plans(con, items: list[dict]) -> list[dict]:
     return clean
 
 
+def paused(con) -> list[dict]:
+    return json.loads(db.get_setting(con, PAUSED_KEY, "[]"))
+
+
+def set_paused(con, items: list[dict]) -> list[dict]:
+    """Recurring payments the outlook leaves out from month `from` to month `to` (YYYY-MM,
+    both included): a salary that will not come for a while, a subscription put on hold."""
+    clean = [{"key": p["key"], "name": str(p.get("name") or p["key"][1:]).strip(),
+              "from": p["from"], "to": p["to"]} for p in items if p.get("key")]
+    db.set_setting(con, PAUSED_KEY, json.dumps(clean))
+    return clean
+
+
 def _basis_months(dates: list[str], today: date) -> list[str]:
     """The last (up to) twelve complete months before this one that the data fully covers:
     within the latest stretch without a hole, starting with the first month the stretch covers
@@ -176,7 +190,7 @@ def forecast(con, account_ids: list[int] | None = None, floor: float = 0.0,
              today: date | None = None, horizon: int = 12) -> dict:
     """The next `horizon` months from the first of the next month, for the chosen accounts.
 
-    Expenses per month = the active recurring payments falling due in it + the variable
+    Expenses per month = the active recurring payments falling due in it (unless paused for it) + the variable
     spending (the mean month of the basis period: everything that is neither a transfer nor a
     recurring payment) + the planned extras. The balance starts at today's balance of the
     accounts. `min_income` is the smallest equal monthly income that keeps the balance at or
@@ -189,6 +203,8 @@ def forecast(con, account_ids: list[int] | None = None, floor: float = 0.0,
     months = [add_months(today.replace(day=1), i + 1) for i in range(horizon)]
     keys = [m.strftime("%Y-%m") for m in months]
     end = add_months(months[-1], 1)
+    pauses = paused(con)
+    left_out = {k: [] for k in keys}   # month -> names of the recurring payments paused in it
 
     def due(kind):
         out = dict.fromkeys(keys, 0.0)
@@ -199,7 +215,11 @@ def forecast(con, account_ids: list[int] | None = None, floor: float = 0.0,
             day = date.fromisoformat(item["next"])
             while day < end:
                 if day >= months[0]:
-                    out[day.strftime("%Y-%m")] += item["amount"]
+                    k = day.strftime("%Y-%m")
+                    if any(p["key"] == item["key"] and p["from"] <= k <= p["to"] for p in pauses):
+                        left_out[k].append(item["name"])
+                    else:
+                        out[k] += item["amount"]
                 day = add_months(day, step)
         return out
     fixed, regular_income = due("expense"), due("income")
@@ -225,7 +245,7 @@ def forecast(con, account_ids: list[int] | None = None, floor: float = 0.0,
         cover.append(cum / i)
         rows_out.append({"month": k, "fixed": round(fixed[k], 2), "variable": variable,
                          "planned": round(planned[k], 2), "expenses": expenses,
-                         "regular_income": round(regular_income[k], 2)})
+                         "regular_income": round(regular_income[k], 2), "paused": left_out[k]})
     min_income = round(max(0.0, max(need)), 2) if need else 0.0
     tight = keys[need.index(max(need))] if need and max(need) > 0 else None
     bal_min, bal_regular = start_balance, start_balance
@@ -246,5 +266,5 @@ def forecast(con, account_ids: list[int] | None = None, floor: float = 0.0,
         "cover_income": round(max(cover), 2) if cover else 0.0,
         "regular_income_monthly": rec["totals"]["income"]["monthly"],
         "lowest_regular": min((r["balance_regular_income"], r["month"]) for r in rows_out) if rows_out else None,
-        "plans": plans(con),
+        "plans": plans(con), "paused": pauses,
     }

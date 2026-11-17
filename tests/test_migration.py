@@ -157,3 +157,33 @@ def test_new_default_categories_take_over_the_users_own(tmp_path, monkeypatch):
     assert rows(db.DB_PATH, "SELECT category_id FROM transactions") == [(own,)]
     assert rows(db.DB_PATH, "SELECT name FROM categories WHERE key='internet_phone'") == [("Internet and phone",)]
     assert rows(db.DB_PATH, "SELECT COUNT(*) FROM categories WHERE name IN ('Donations', 'Spenden')") == [(1,)]
+
+
+def test_a_renamed_default_category_is_renamed_in_old_databases(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "old.db")
+    db.init_db()
+    con = sqlite3.connect(db.DB_PATH)
+    con.execute("UPDATE categories SET name='Travel' WHERE key='travel'")
+    con.commit()
+    con.close()
+    db.init_db()
+    assert rows(db.DB_PATH, "SELECT name FROM categories WHERE key='travel'") == [("Travel and holidays",)]
+    # a name the user gave it himself stays
+    con = sqlite3.connect(db.DB_PATH)
+    con.execute("UPDATE categories SET name='Reisen' WHERE key='travel'")
+    con.commit()
+    con.close()
+    db.init_db()
+    assert rows(db.DB_PATH, "SELECT name FROM categories WHERE key='travel'") == [("Reisen",)]
+
+
+def test_cash_withdrawal_takes_over_an_own_cash_category(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "old.db")
+    db.init_db()
+    con = sqlite3.connect(db.DB_PATH)
+    con.execute("DELETE FROM categories WHERE key='cash'")
+    own = con.execute("INSERT INTO categories(name, kind) VALUES ('Bargeld', 'expense')").lastrowid
+    con.commit()
+    con.close()
+    db.init_db()
+    assert rows(db.DB_PATH, "SELECT id, key, kind FROM categories WHERE key='cash'") == [(own, "cash", "expense")]

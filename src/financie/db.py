@@ -146,12 +146,13 @@ DEFAULT_CATEGORIES = [
     ("energy", "Energy", "expense"), ("transport", "Transport", "expense"),
     ("car", "Car", "expense"), ("restaurants", "Restaurants", "expense"),
     ("health", "Health", "expense"), ("clothing", "Clothing", "expense"),
-    ("entertainment", "Entertainment", "expense"), ("travel", "Travel", "expense"),
+    ("entertainment", "Entertainment", "expense"), ("travel", "Travel and holidays", "expense"),
     ("education", "Education", "expense"), ("children", "Children", "expense"),
     ("household", "Household", "expense"), ("insurance", "Insurance", "expense"),
     ("fees", "Fees", "expense"), ("gifts", "Gifts", "expense"),
     ("sport", "Sport", "expense"), ("subscriptions", "Subscriptions", "expense"),
     ("internet_phone", "Internet and phone", "expense"), ("donations", "Donations", "expense"),
+    ("cash", "Cash withdrawal", "expense"),
     ("savings_investments", "Savings and investments", "expense"),
     ("other_expenses", "Other expenses", "expense"),
     ("salary", "Salary", "income"), ("business", "Business income", "income"),
@@ -160,6 +161,10 @@ DEFAULT_CATEGORIES = [
 ]
 DEFAULT_ACCOUNT = ("Checking account", "checking")
 
+# Default categories renamed later: key -> earlier English name. The database takes the new
+# one (it is what Gemma reads) unless the user renamed the category himself.
+RENAMED_DEFAULTS = {"travel": "Travel"}
+
 # Default categories added later: a category the user already made for the same purpose
 # (by one of these names, any case) becomes the default one, so there are never two.
 ADOPT_NAMES = {
@@ -167,6 +172,8 @@ ADOPT_NAMES = {
                        "telefon und internet", "telefón a internet", "telefon a internet", "internet & telefon",
                        "internet/telefon", "internet", "telefon", "telefón", "telefonie", "phone"),
     "donations": ("donations", "donation", "spenden", "spende", "dary", "dar", "charity"),
+    "cash": ("cash", "cash withdrawal", "cash withdrawals", "bargeld", "bargeldabhebung", "bargeldauszahlung",
+             "geldautomat", "hotovosť", "hotovost", "výber hotovosti", "vyber hotovosti", "bankomat", "atm"),
 }
 
 # schema version 0 stored Slovak values; version 1 stores English codes and names
@@ -218,6 +225,10 @@ def init_db():
     con.execute("CREATE INDEX IF NOT EXISTS idx_tx_import ON transactions(import_id)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_tx_ref ON transactions(account_id, ref)")
     _adopt_user_categories(con)
+    names = {key: name for key, name, _ in DEFAULT_CATEGORIES}
+    for key, old in RENAMED_DEFAULTS.items():
+        if not con.execute("SELECT 1 FROM categories WHERE name=?", (names[key],)).fetchone():
+            con.execute("UPDATE categories SET name=? WHERE key=? AND name=?", (names[key], key, old))
     for key, name, kind in DEFAULT_CATEGORIES:
         con.execute("INSERT OR IGNORE INTO categories(key, name, kind) VALUES (?,?,?)", (key, name, kind))
     if con.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0:

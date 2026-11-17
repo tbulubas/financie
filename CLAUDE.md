@@ -124,6 +124,9 @@ pytest, shared IntelliJ run configs, copyright header in every source file.
   `init_db()` inserts missing defaults into existing databases (no migration needed);
   for one added later, list its usual names in `ADOPT_NAMES`, so a category the user
   already made for it (e.g. "Spenden") takes the key instead of getting a twin.
+  Renaming a default: change its name in `DEFAULT_CATEGORIES` and `cat_<key>`, and put
+  the old English name in `RENAMED_DEFAULTS` — existing databases take the new name
+  (Gemma reads it) unless the user renamed the category himself.
   Each category keeps one color everywhere (`catColor()`: `CAT_COLORS` by key for the
   defaults — a new default needs one —, a golden-angle hue for the user's own), never
   a color by its rank in a chart.
@@ -192,20 +195,23 @@ pytest, shared IntelliJ run configs, copyright header in every source file.
   /api/transactions/years` lists the years with data; `GET /api/transactions` takes
   `month` (`YYYY-MM`) or `year` (the UI raises `limit` for a whole year).
 - **Plan tab** (`planning.py`, `GET /api/recurring`, `GET /api/forecast?floor=`, `PUT
-  /api/forecast/plans`, `POST /api/recurring/ignore`). Recurring payments: transactions
-  of the last ~800 days (transfers left out) grouped by `group_key()` (counterparty, else
+  /api/forecast/plans`, `PUT /api/forecast/paused`, `POST /api/recurring/ignore`).
+  Recurring payments: transactions of the last ~800 days (transfers left out) grouped by `group_key()` (counterparty, else
   the first words of the description, without digits and punctuation, plus the sign);
   `_period()` accepts a period when most intervals match it (a skipped payment and holes
   in the history allowed; monthly and quarterly need 3 payments). Fewer than 4 payments
   must have nearly the same amount. The amount is the last one when the last two agree
   (a fixed amount, with `changed_from`), else the mean of the last six. Active = paid
-  within 1.5 periods of the end of the data. Ignored keys and planned extras live in
-  `settings` as JSON (`recurring_ignored`, `forecast_plans`), so no schema change. The
-  outlook: 12 months from the next month, recurring payments on their dates + the mean
-  everyday month (non-recurring expenses of up to 12 complete months of the latest
-  stretch) + plans, from today's balance of all non-investment accounts; `min_income`
-  keeps every month-end at or above `floor`, `cover_income` never touches today's
-  balance. All arithmetic in Python; the UI only shows it.
+  within 1.5 periods of the end of the data. Ignored keys, planned extras and pauses live
+  in `settings` as JSON (`recurring_ignored`, `forecast_plans`, `forecast_paused`), so no
+  schema change. The outlook: 12 months from the next month, recurring payments on their
+  dates + the mean everyday month (non-recurring expenses of up to 12 complete months of
+  the latest stretch) + plans, from today's balance of all non-investment accounts;
+  `min_income` keeps every month-end at or above `floor`, `cover_income` never touches
+  today's balance. A pause (`PUT /api/forecast/paused`, `{key, name, from, to}`, months
+  included) leaves a recurring payment out of those months — a salary that will not come,
+  a subscription on hold; each month lists its paused names (⏸). The UI adds a plan
+  "from … to" as one plan per month. All arithmetic in Python; the UI only shows it.
 - **Overview panels** (`[data-panel]` in `#tab-overview`): the 📊 menu hides or shows
   them, clicking a title collapses it; `applyPanels()` keeps both in `localStorage`
   (`ovPanels`). A new chart on the overview gets a `data-panel` and a menu entry.

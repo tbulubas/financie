@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from financie import db, gemma, importer, planning
 
@@ -155,6 +155,27 @@ def forecast_plans(items: list[Plan]):
     con = db.get_db()
     try:
         return planning.set_plans(con, [p.model_dump() for p in items])
+    finally:
+        con.close()
+
+
+class Pause(BaseModel):
+    key: str
+    name: str = ""
+    from_: str = Field(alias="from")
+    to: str
+
+
+@app.put("/api/forecast/paused")
+def forecast_paused(items: list[Pause]):
+    """Recurring payments the outlook leaves out from month `from` to `to` (YYYY-MM, both included)."""
+    month = re.compile(r"\d{4}-(0[1-9]|1[0-2])")
+    for p in items:
+        if not p.key or not month.fullmatch(p.from_) or not month.fullmatch(p.to) or p.from_ > p.to:
+            raise HTTPException(400, {"code": "invalid_pause", "info": p.name})
+    con = db.get_db()
+    try:
+        return planning.set_paused(con, [p.model_dump(by_alias=True) for p in items])
     finally:
         con.close()
 

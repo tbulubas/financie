@@ -242,8 +242,18 @@
     <div class="toolbar" style="margin-top:10px">
       <input id="planName" data-i18n-ph="plan_name_ph">
       <select id="planMonth"></select>
+      <label><span data-i18n="month_to"></span> <select id="planTo"></select></label>
       <input type="number" id="planAmount" step="10" min="0" data-i18n-ph="plan_amount_ph" style="width:130px">
       <button class="btn" onclick="addPlan()" data-i18n="plan_add"></button>
+    </div>
+    <h2 style="margin-top:18px" data-i18n="paused_title"></h2>
+    <p class="hint" data-i18n="paused_hint"></p>
+    <table id="pauseTable"><tbody></tbody></table>
+    <div class="toolbar" style="margin-top:10px">
+      <select id="pauseItem"></select>
+      <label><span data-i18n="month_from"></span> <select id="pauseFrom"></select></label>
+      <label><span data-i18n="month_to"></span> <select id="pauseTo"></select></label>
+      <button class="btn" onclick="addPause()" data-i18n="pause_add"></button>
     </div>
   </div>
 </section>
@@ -468,6 +478,9 @@ sk: {
   fc_chart_regular:'zostatok s dnešným pravidelným príjmom', fc_chart_min:'zostatok s minimálnym príjmom',
   plans_title:'Plánované výdavky', plan_name_ph:'napr. Dovolenka', plan_amount_ph:'Suma €', plan_add:'Pridať',
   plans_none:'Žiadne — pridaj dovolenku, auto, …', err_invalid_plan:'Neplatný plán (mesiac alebo suma)',
+  month_from:'od', month_to:'do', paused_title:'Vynechané pravidelné platby',
+  paused_hint:'Napr. výplata, ktorá pár mesiacov nepríde, alebo pozastavené predplatné: výhľad ju v týchto mesiacoch nepočíta.',
+  pause_add:'Vynechať', paused_none:'Žiadne', err_invalid_pause:'Neplatné vynechanie (mesiace)', fc_paused:n=>`vynechané: ${n}`,
   err_name_required:'Zadaj názov účtu', err_name_taken:'Účet s týmto názvom už existuje',
   cov_late:l=>`⚠ Na začiatku obdobia chýbajú dáta: ${l}`, cov_from:(n, d)=>`${n} až od ${d}`, cov_none:n=>`${n} žiadne`,
   check_title:'Kontrola: zadať skutočný zostatok z banky a porovnať ho s appkou',
@@ -482,9 +495,9 @@ sk: {
   err_empty_name:'Názov nesmie byť prázdny.', err_duplicate_category:'Kategória s týmto názvom už existuje.',
   cat_groceries:'Potraviny', cat_housing:'Bývanie', cat_energy:'Energie', cat_transport:'Doprava',
   cat_car:'Auto', cat_restaurants:'Reštaurácie', cat_health:'Zdravie', cat_clothing:'Oblečenie',
-  cat_entertainment:'Zábava', cat_travel:'Cestovanie', cat_education:'Vzdelávanie',
+  cat_entertainment:'Zábava', cat_travel:'Cestovanie a dovolenky', cat_education:'Vzdelávanie',
   cat_children:'Deti', cat_household:'Domácnosť', cat_insurance:'Poistenie', cat_fees:'Poplatky',
-  cat_gifts:'Darčeky', cat_sport:'Šport', cat_subscriptions:'Predplatné', cat_internet_phone:'Internet a telefón', cat_donations:'Dary',
+  cat_gifts:'Darčeky', cat_sport:'Šport', cat_subscriptions:'Predplatné', cat_internet_phone:'Internet a telefón', cat_donations:'Dary', cat_cash:'Výber hotovosti',
   cat_savings_investments:'Sporenie a investície', cat_other_expenses:'Iné výdavky',
   cat_salary:'Mzda', cat_business:'Podnikanie', cat_investment_income:'Investičný výnos',
   cat_other_income:'Iné príjmy', cat_transfer:'Prevod medzi účtami',
@@ -605,6 +618,9 @@ de: {
   fc_chart_regular:'Saldo mit dem heutigen regelmäßigen Einkommen', fc_chart_min:'Saldo mit dem Mindesteinkommen',
   plans_title:'Geplante Ausgaben', plan_name_ph:'z. B. Urlaub', plan_amount_ph:'Betrag €', plan_add:'Hinzufügen',
   plans_none:'Keine — füge Urlaub, Auto, … hinzu', err_invalid_plan:'Ungültiger Plan (Monat oder Betrag)',
+  month_from:'von', month_to:'bis', paused_title:'Ausgesetzte regelmäßige Zahlungen',
+  paused_hint:'Z. B. ein Gehalt, das ein paar Monate ausbleibt, oder ein pausiertes Abo: die Vorschau lässt es in diesen Monaten weg.',
+  pause_add:'Aussetzen', paused_none:'Keine', err_invalid_pause:'Ungültige Aussetzung (Monate)', fc_paused:n=>`ausgesetzt: ${n}`,
   err_name_required:'Gib einen Kontonamen ein', err_name_taken:'Ein Konto mit diesem Namen gibt es schon',
   cov_late:l=>`⚠ Am Anfang des Zeitraums fehlen Daten: ${l}`, cov_from:(n, d)=>`${n} erst ab ${d}`, cov_none:n=>`${n} keine`,
   check_title:'Kontrolle: tatsächlichen Saldo der Bank eingeben und mit der App vergleichen',
@@ -619,10 +635,10 @@ de: {
   err_empty_name:'Name darf nicht leer sein.', err_duplicate_category:'Kategorie mit diesem Namen existiert bereits.',
   cat_groceries:'Lebensmittel', cat_housing:'Wohnen', cat_energy:'Energie',
   cat_transport:'Verkehr', cat_car:'Auto', cat_restaurants:'Restaurants', cat_health:'Gesundheit',
-  cat_clothing:'Kleidung', cat_entertainment:'Freizeit', cat_travel:'Reisen',
+  cat_clothing:'Kleidung', cat_entertainment:'Freizeit', cat_travel:'Reisen und Urlaub',
   cat_education:'Bildung', cat_children:'Kinder', cat_household:'Haushalt',
   cat_insurance:'Versicherungen', cat_fees:'Gebühren', cat_gifts:'Geschenke', cat_sport:'Sport',
-  cat_subscriptions:'Abonnements', cat_internet_phone:'Internet und Telefon', cat_donations:'Spenden', cat_savings_investments:'Sparen und Investieren',
+  cat_subscriptions:'Abonnements', cat_internet_phone:'Internet und Telefon', cat_donations:'Spenden', cat_cash:'Bargeldabhebung', cat_savings_investments:'Sparen und Investieren',
   cat_other_expenses:'Sonstige Ausgaben', cat_salary:'Gehalt', cat_business:'Selbstständigkeit',
   cat_investment_income:'Kapitalerträge', cat_other_income:'Sonstige Einnahmen',
   cat_transfer:'Umbuchung zwischen Konten',
@@ -743,6 +759,9 @@ en: {
   fc_chart_regular:'balance with today\'s regular income', fc_chart_min:'balance with the minimum income',
   plans_title:'Planned expenses', plan_name_ph:'e.g. Holiday', plan_amount_ph:'Amount €', plan_add:'Add',
   plans_none:'None — add a holiday, a car, …', err_invalid_plan:'Invalid plan (month or amount)',
+  month_from:'from', month_to:'to', paused_title:'Paused recurring payments',
+  paused_hint:'E.g. a salary that will not come for a few months, or a subscription on hold: the outlook leaves it out of those months.',
+  pause_add:'Pause', paused_none:'None', err_invalid_pause:'Invalid pause (months)', fc_paused:n=>`paused: ${n}`,
   err_name_required:'Enter a name for the account', err_name_taken:'An account with this name already exists',
   cov_late:l=>`⚠ Data missing at the start of the period: ${l}`, cov_from:(n, d)=>`${n} only from ${d}`, cov_none:n=>`${n} none`,
   check_title:'Check: enter the real balance from the bank and compare it with the app',
@@ -757,9 +776,9 @@ en: {
   err_empty_name:'Name must not be empty.', err_duplicate_category:'A category with this name already exists.',
   cat_groceries:'Groceries', cat_housing:'Housing', cat_energy:'Energy', cat_transport:'Transport',
   cat_car:'Car', cat_restaurants:'Restaurants', cat_health:'Health', cat_clothing:'Clothing',
-  cat_entertainment:'Entertainment', cat_travel:'Travel', cat_education:'Education',
+  cat_entertainment:'Entertainment', cat_travel:'Travel and holidays', cat_education:'Education',
   cat_children:'Children', cat_household:'Household', cat_insurance:'Insurance', cat_fees:'Fees',
-  cat_gifts:'Gifts', cat_sport:'Sport', cat_subscriptions:'Subscriptions', cat_internet_phone:'Internet and phone', cat_donations:'Donations',
+  cat_gifts:'Gifts', cat_sport:'Sport', cat_subscriptions:'Subscriptions', cat_internet_phone:'Internet and phone', cat_donations:'Donations', cat_cash:'Cash withdrawal',
   cat_savings_investments:'Savings and investments', cat_other_expenses:'Other expenses',
   cat_salary:'Salary', cat_business:'Business income', cat_investment_income:'Investment income',
   cat_other_income:'Other income', cat_transfer:'Transfer between accounts',
@@ -905,7 +924,7 @@ const CAT_COLORS = {
   restaurants:'#ff6b6b', health:'#facc15', clothing:'#ff8fab', entertainment:'#c084fc', travel:'#14b8a6',
   education:'#a3e635', children:'#fdba74', household:'#94a3b8', insurance:'#f97316', fees:'#a16207',
   gifts:'#e879f9', sport:'#65a30d', subscriptions:'#6366f1', savings_investments:'#0ea5e9',
-  other_expenses:'#78716c', internet_phone:'#be185d', donations:'#fde68a',
+  other_expenses:'#78716c', internet_phone:'#be185d', donations:'#fde68a', cash:'#d6d3d1',
   salary:'#22c55e', business:'#059669', investment_income:'#10b981', other_income:'#4ade80', transfer:'#64748b',
 };
 function catColor(id, key) {
@@ -1594,7 +1613,7 @@ async function undoImport(id) {
 
 // Plan: recurring payments found in the transactions and the outlook for the next twelve
 // months. Every figure comes from the server (planning.py); nothing is computed here.
-let fcData = null;
+let fcData = null, recData = null;
 function recRow(i, other) {
   const amount = `<span class="${i.kind === 'income' ? 'green' : 'red'}">${fmt(i.kind === 'income' ? i.amount : -i.amount)}</span>`
     + (i.changed_from != null ? `<small class="warn">${esc(t('rec_changed')(fmt(i.changed_from)))}</small>` : '')
@@ -1621,6 +1640,10 @@ async function loadPlan() {
   $('#recMore').classList.toggle('hidden', !other.length);
   $('#recMoreSum').textContent = t('rec_more')(other.length);
   $('#recOther tbody').innerHTML = other.map(i => recRow(i, true)).join('');
+  recData = rec;
+  // income first: a salary that will not come is the usual reason to pause one
+  $('#pauseItem').innerHTML = [...shown].sort((a, b) => (a.kind === 'income' ? 0 : 1) - (b.kind === 'income' ? 0 : 1))
+    .map(i => `<option value="${esc(i.key)}">${esc(i.name)} (${fmt(i.kind === 'income' ? i.amount : -i.amount)}, ${esc(t('per_' + i.period))})</option>`).join('');
   renderForecast(fc);
 }
 function renderForecast(fc) {
@@ -1635,7 +1658,8 @@ function renderForecast(fc) {
     : t('fc_no_basis');
   $('#fcReg').textContent = fmt(fc.regular_income_monthly);
   $('#fcRegHint').textContent = t('fc_surplus')(fc.regular_income_monthly - fc.expenses_monthly);
-  $('#fcTable tbody').innerHTML = fc.months.map(m => `<tr><td class="nowrap">${m.month}</td>
+  $('#fcTable tbody').innerHTML = fc.months.map(m => `<tr><td class="nowrap">${m.month}${m.paused.length
+      ? ` <span class="warn" title="${esc(t('fc_paused')(m.paused.join(', ')))}">⏸</span>` : ''}</td>
     <td class="num">${fmt(m.fixed)}</td><td class="num">${fmt(m.variable)}</td><td class="num">${m.planned ? fmt(m.planned) : '–'}</td>
     <td class="num red">${fmt(m.expenses)}</td><td class="num green">${fmt(m.regular_income)}</td>
     <td class="num ${m.balance_regular_income < fc.floor ? 'red' : ''}">${fmt(m.balance_regular_income)}</td>
@@ -1646,12 +1670,38 @@ function renderForecast(fc) {
       {label: t('floor_label'), data: fc.months.map(() => fc.floor), borderColor: '#ff6b6b', borderDash: [6, 4], pointRadius: 0, borderWidth: 1}]},
     options: {maintainAspectRatio: false, scales: {x: {ticks: {color: '#8b96ab'}}, y: {ticks: {color: '#8b96ab', callback: v => fmt(v)}}},
       plugins: {legend: {labels: {color: '#e8ecf4'}}}}});
-  $('#planMonth').innerHTML = fc.months.map(m => `<option value="${m.month}">${m.month}</option>`).join('');
+  const options = fc.months.map(m => `<option value="${m.month}">${m.month}</option>`).join('');
+  ['#planMonth', '#planTo', '#pauseFrom', '#pauseTo'].forEach(s => {
+    const keep = $(s).value;
+    $(s).innerHTML = options;
+    if (fc.months.some(m => m.month === keep)) $(s).value = keep;
+  });
   $('#planTable tbody').innerHTML = fc.plans.length ? fc.plans.map((p, i) => `<tr><td>${esc(p.name)}</td>
     <td class="nowrap">${p.month}</td><td class="num red">${fmt(-p.amount)}</td>
     <td><button class="btn" onclick="delPlan(${i})">✕</button></td></tr>`).join('')
     : `<tr><td class="hint">${esc(t('plans_none'))}</td></tr>`;
+  $('#pauseTable tbody').innerHTML = fc.paused.length ? fc.paused.map((p, i) => `<tr><td>${esc(p.name)}</td>
+    <td class="nowrap">${p.from === p.to ? p.from : p.from + ' – ' + p.to}</td>
+    <td><button class="btn" onclick="delPause(${i})">✕</button></td></tr>`).join('')
+    : `<tr><td class="hint">${esc(t('paused_none'))}</td></tr>`;
 }
+// "to" never before "from": moving the start drags the end along
+function keepRange(from, to) {
+  $(from).addEventListener('change', () => { if ($(to).value < $(from).value) $(to).value = $(from).value; });
+  $(to).addEventListener('change', () => { if ($(to).value < $(from).value) $(from).value = $(to).value; });
+}
+async function savePaused(items) {
+  try {
+    await api('/api/forecast/paused', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(items)});
+  } catch(e) { alert(e.message); }
+  renderForecast(await api(`/api/forecast?floor=${+$('#fcFloor').value || 0}`));
+}
+function addPause() {
+  const item = recData?.items.find(i => i.key === $('#pauseItem').value);
+  if (!item) return;
+  savePaused([...fcData.paused, {key: item.key, name: item.name, from: $('#pauseFrom').value, to: $('#pauseTo').value}]);
+}
+function delPause(i) { savePaused(fcData.paused.filter((_, j) => j !== i)); }
 async function ignoreRec(key, ignored) {
   await api('/api/recurring/ignore', {method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({key, ignored})});
@@ -1666,7 +1716,9 @@ async function savePlans(plans) {
 function addPlan() {
   const name = $('#planName').value.trim(), amount = +$('#planAmount').value;
   if (!name || !(amount > 0)) return;
-  savePlans([...fcData.plans, {name, month: $('#planMonth').value, amount}]);
+  // one plan per month from "month" to "to": 1 200 € a month for three months is three plans
+  const months = fcData.months.map(m => m.month).filter(m => m >= $('#planMonth').value && m <= $('#planTo').value);
+  savePlans([...fcData.plans, ...(months.length ? months : [$('#planMonth').value]).map(month => ({name, month, amount}))]);
   $('#planName').value = ''; $('#planAmount').value = '';
 }
 function delPlan(i) { savePlans(fcData.plans.filter((_, j) => j !== i)); }
@@ -1711,6 +1763,8 @@ $('#langSel').onchange = () => {
   }));
   ['#txYear','#txMonth'].forEach(s => $(s).addEventListener('change', () => { txFrom = null; readTxPeriod(); loadTransactions(); }));
   $('#txAccount').addEventListener('change', () => { txFrom = null; });
+  keepRange('#planMonth', '#planTo');
+  keepRange('#pauseFrom', '#pauseTo');
   $('#fcFloor').addEventListener('change', async () =>
     renderForecast(await api(`/api/forecast?floor=${+$('#fcFloor').value || 0}`)));
   $('#txTag').addEventListener('change', () => { if ($('#txTag').value) { txPeriod = {year: '', month: ''}; txFrom = null; } loadTransactions(); });

@@ -347,8 +347,11 @@ is shown.
 - **Outlook for 12 months.** From the first of next month: the recurring payments
   on their due dates, the everyday spending of an average month (the mean of up to
   twelve complete months of the latest stretch of your data) and the extras you
-  plan (a holiday, a washing machine). Starting from today's balance of all
-  accounts except investment ones, it shows
+  plan (a holiday, a washing machine; one month or several, such as health
+  insurance you pay yourself for three months). A recurring payment can be
+  **paused** for some months — a salary that will not come for a while, a
+  subscription on hold — to see whether you get through without it. Starting
+  from today's balance of all accounts except investment ones, it shows
   - the **minimum income per month** that keeps the balance above a floor you
     set (0 = no debt) in every month,
   - the **income without using savings**, which covers each month's expenses
